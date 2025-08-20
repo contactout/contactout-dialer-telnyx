@@ -1,0 +1,130 @@
+'use client';
+
+import { useState } from 'react';
+import DialPad from '@/components/DialPad';
+import PhoneMockup from '@/components/PhoneMockup';
+import { useDeviceDetection } from '@/hooks/useDeviceDetection';
+import { useTelnyxWebRTC } from '@/hooks/useTelnyxWebRTC';
+
+export default function Home() {
+  const [phoneNumber, setPhoneNumber] = useState('');
+  const { isMobile } = useDeviceDetection();
+
+  // Telnyx configuration from environment variables
+  const telnyxConfig = {
+    apiKey: process.env.NEXT_PUBLIC_TELNYX_API_KEY || '',
+    sipUsername: process.env.NEXT_PUBLIC_TELNYX_SIP_USERNAME || '',
+    sipPassword: process.env.NEXT_PUBLIC_TELNYX_SIP_PASSWORD || '',
+  };
+
+  const {
+    isConnected,
+    isCallActive,
+    isConnecting,
+    error,
+    makeCall,
+    hangupCall,
+    sendDTMF,
+  } = useTelnyxWebRTC(telnyxConfig);
+
+  const handleDigitPress = (digit: string) => {
+    if (isCallActive) {
+      // Send DTMF tone during active call
+      sendDTMF(digit);
+    } else {
+      // Add digit to phone number
+      setPhoneNumber(prev => prev + digit);
+    }
+  };
+
+  const handleCall = () => {
+    if (phoneNumber) {
+      makeCall(phoneNumber);
+    }
+  };
+
+  const handleHangup = () => {
+    hangupCall();
+    setPhoneNumber('');
+  };
+
+  const handleClearNumber = () => {
+    if (!isCallActive) {
+      setPhoneNumber('');
+    }
+  };
+
+  const dialPadComponent = (
+    <div className="w-full">
+      {/* Connection Status */}
+      <div className="mb-4 text-center">
+        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+          isConnected 
+            ? 'bg-green-100 text-green-800' 
+            : 'bg-red-100 text-red-800'
+        }`}>
+          <div className={`w-2 h-2 rounded-full mr-2 ${
+            isConnected ? 'bg-green-500' : 'bg-red-500'
+          }`}></div>
+          {isConnected ? 'Connected' : 'Disconnected'}
+        </div>
+      </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm text-center">
+          {error}
+        </div>
+      )}
+
+      {/* Dial Pad */}
+      <DialPad
+        phoneNumber={phoneNumber}
+        onDigitPress={handleDigitPress}
+        onCall={handleCall}
+        onHangup={handleHangup}
+        isCallActive={isCallActive}
+        isConnecting={isConnecting}
+      />
+
+      {/* Clear Button */}
+      {phoneNumber && !isCallActive && (
+        <div className="mt-4 text-center">
+          <button
+            onClick={handleClearNumber}
+            className="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm"
+          >
+            Clear
+          </button>
+        </div>
+      )}
+
+      {/* Instructions */}
+      <div className="mt-8 text-center text-sm text-gray-500">
+        {!isConnected && (
+          <p>Configure your Telnyx credentials in .env.local to get started</p>
+        )}
+        {isConnected && !isCallActive && (
+          <p>Enter a phone number and press Call</p>
+        )}
+        {isCallActive && (
+          <p>Use the dial pad to send DTMF tones</p>
+        )}
+      </div>
+    </div>
+  );
+
+  return (
+    <main className="min-h-screen">
+      {isMobile ? (
+        <div className="p-6 flex flex-col justify-center min-h-screen bg-gray-50">
+          {dialPadComponent}
+        </div>
+      ) : (
+        <PhoneMockup>
+          {dialPadComponent}
+        </PhoneMockup>
+      )}
+    </main>
+  );
+}
