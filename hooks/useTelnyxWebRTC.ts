@@ -5,6 +5,7 @@ interface TelnyxConfig {
   apiKey: string;
   sipUsername: string;
   sipPassword: string;
+  phoneNumber: string;
 }
 
 export const useTelnyxWebRTC = (config: TelnyxConfig) => {
@@ -17,7 +18,7 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
 
   // Initialize Telnyx client
   useEffect(() => {
-    if (!config.apiKey || !config.sipUsername || !config.sipPassword) {
+    if (!config.apiKey || !config.sipUsername || !config.sipPassword || !config.phoneNumber) {
       setError('Missing Telnyx credentials');
       return;
     }
@@ -106,7 +107,7 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
       console.error('Failed to initialize Telnyx client:', err);
       setError('Failed to initialize WebRTC client');
     }
-  }, [config.apiKey, config.sipUsername, config.sipPassword]);
+  }, [config.apiKey, config.sipUsername, config.sipPassword, config.phoneNumber]);
 
   // Make a call
   const makeCall = useCallback(async (phoneNumber: string) => {
@@ -127,7 +128,7 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
 
       const call = client.newCall({
         destinationNumber: phoneNumber,
-        callerNumber: config.sipUsername,
+        callerNumber: config.phoneNumber,
       });
 
       setCurrentCall(call);
@@ -146,7 +147,7 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
       setError(err.message || 'Failed to make call');
       setIsConnecting(false);
     }
-  }, [client, isConnected, config.sipUsername, isConnecting, isCallActive]);
+  }, [client, isConnected, config.phoneNumber, isConnecting, isCallActive]);
 
   // Hang up call
   const hangupCall = useCallback(() => {

@@ -18,6 +18,7 @@ export default function Home() {
     apiKey: process.env.NEXT_PUBLIC_TELNYX_API_KEY || '',
     sipUsername: process.env.NEXT_PUBLIC_TELNYX_SIP_USERNAME || '',
     sipPassword: process.env.NEXT_PUBLIC_TELNYX_SIP_PASSWORD || '',
+    phoneNumber: process.env.NEXT_PUBLIC_TELNYX_PHONE_NUMBER || '',
   };
 
   const {
