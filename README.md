@@ -16,6 +16,7 @@ A simple, responsive dialer app built with Next.js and Telnyx WebRTC SDK. Featur
 - **TypeScript** - Type safety
 - **TailwindCSS** - Styling
 - **Telnyx WebRTC SDK** - Voice calling functionality
+- **Supabase** - Authentication with Google OAuth
 
 ## Setup Instructions
 
@@ -41,9 +42,32 @@ npm install
    NEXT_PUBLIC_TELNYX_API_KEY=your_api_key_here
    NEXT_PUBLIC_TELNYX_SIP_USERNAME=your_sip_username_here
    NEXT_PUBLIC_TELNYX_SIP_PASSWORD=your_sip_password_here
+   NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url_here
+   NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key_here
    ```
 
-### 3. Run Development Server
+### 3. Configure Supabase Authentication
+
+1. Create a new project at [Supabase](https://supabase.com)
+
+2. Get your project credentials:
+   - **Project URL**: Found in Settings > API
+   - **Anon Key**: Found in Settings > API
+
+3. Enable Google OAuth:
+   - Go to Authentication > Providers in your Supabase dashboard
+   - Enable Google provider
+   - Add your Google OAuth credentials (Client ID and Client Secret)
+   - Set the redirect URL to: `https://your-project-ref.supabase.co/auth/v1/callback`
+
+4. Configure Google OAuth in Google Cloud Console:
+   - Create a new project or use existing one
+   - Enable Google+ API
+   - Create OAuth 2.0 credentials
+   - Add your domain to authorized origins
+   - Add Supabase callback URL to authorized redirect URIs
+
+### 4. Run Development Server
 
 ```bash
 npm run dev
