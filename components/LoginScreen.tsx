@@ -3,7 +3,7 @@
 import { useAuth } from '@/contexts/AuthContext';
 
 export default function LoginScreen() {
-  const { signInWithGoogle, loading } = useAuth();
+  const { signInWithGoogle, loading, authError } = useAuth();
 
   return (
     <div className="min-h-screen bg-gray-50 flex flex-col justify-center py-12 sm:px-6 lg:px-8">
@@ -14,7 +14,7 @@ export default function LoginScreen() {
             ContactOut Dialer
           </h2>
           <p className="mt-2 text-sm text-gray-600">
-            Sign in to access the dialer
+            Sign in with your ContactOut email to access the dialer
           </p>
         </div>
       </div>

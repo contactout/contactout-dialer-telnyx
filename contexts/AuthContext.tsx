@@ -10,6 +10,7 @@ interface AuthContextType {
   loading: boolean;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
+  authError: string | null;
 }
 
 const AuthContext = createContext<AuthContextType | undefined>(undefined);
@@ -18,6 +19,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [user, setUser] = useState<User | null>(null);
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
+  const [authError, setAuthError] = useState<string | null>(null);
+
+  // Domain validation function
+  const isContactOutDomain = (email: string): boolean => {
+    return email.endsWith('@contactout.com') || email.endsWith('@contactout.io');
+  };
 
   useEffect(() => {
     // Check if Supabase credentials are configured
@@ -44,7 +51,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Listen for auth changes
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange((_event, session) => {
+    } = supabase.auth.onAuthStateChange(async (event, session) => {
+      if (session?.user?.email) {
+        // Check if the user's email domain is allowed
+        if (!isContactOutDomain(session.user.email)) {
+          setAuthError('Access restricted to ContactOut domain emails only.');
+          // Sign out the user immediately
+          await supabase.auth.signOut();
+          setSession(null);
+          setUser(null);
+          setLoading(false);
+          return;
+        }
+        // Clear any previous auth errors for valid users
+        setAuthError(null);
+      }
+      
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
@@ -70,6 +92,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     if (error) {
       console.error('Error signing out:', error.message);
     }
+    // Clear auth error on sign out
+    setAuthError(null);
   };
 
   const value = {
@@ -78,6 +102,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     loading,
     signInWithGoogle,
     signOut,
+    authError,
   };
 
   return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
