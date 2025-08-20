@@ -5,6 +5,7 @@ interface DialPadProps {
   onDigitPress: (digit: string) => void;
   onCall: () => void;
   onHangup: () => void;
+  onClear: () => void;
   isCallActive: boolean;
   isConnecting: boolean;
 }
@@ -14,6 +15,7 @@ const DialPad: React.FC<DialPadProps> = ({
   onDigitPress,
   onCall,
   onHangup,
+  onClear,
   isCallActive,
   isConnecting,
 }) => {
@@ -54,13 +56,23 @@ const DialPad: React.FC<DialPadProps> = ({
       {/* Call Control Buttons */}
       <div className="flex gap-4 justify-center">
         {!isCallActive ? (
-          <button
-            onClick={onCall}
-            disabled={!phoneNumber || isConnecting}
-            className="flex-1 max-w-[120px] bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-full transition-colors shadow-lg"
-          >
-            {isConnecting ? 'Calling...' : 'Call'}
-          </button>
+          <>
+            <button
+              onClick={onCall}
+              disabled={!phoneNumber || isConnecting}
+              className="flex-1 max-w-[120px] bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-full transition-colors shadow-lg"
+            >
+              {isConnecting ? 'Calling...' : 'Call'}
+            </button>
+            {phoneNumber && (
+              <button
+                onClick={onClear}
+                className="flex-1 max-w-[100px] bg-gray-500 hover:bg-gray-600 text-white font-semibold py-3 px-4 rounded-full transition-colors shadow-lg"
+              >
+                Clear
+              </button>
+            )}
+          </>
         ) : (
           <button
             onClick={onHangup}

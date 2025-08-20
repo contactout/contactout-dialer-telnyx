@@ -38,8 +38,9 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
 
       telnyxClient.on('telnyx.error', (error: any) => {
         console.error('Telnyx error:', error);
-        setError(error.message || 'Connection error');
+        setError(`Telnyx Error: ${error.message || 'Connection error'}`);
         setIsConnected(false);
+        setIsConnecting(false);
       });
 
       telnyxClient.on('telnyx.socket.close', () => {
@@ -49,9 +50,11 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
 
       // Handle call notifications
       telnyxClient.on('telnyx.notification', (notification: any) => {
+        console.log('Telnyx notification:', notification);
+        
         if (notification.type === 'callUpdate') {
           const call = notification.call;
-          console.log('Call update:', call.state);
+          console.log('Call update:', call.state, call);
           
           switch (call.state) {
             case 'ringing':
@@ -70,10 +73,20 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
               setCurrentCall(null);
               break;
             case 'purge':
+              console.log('Call purged - call failed');
               setIsCallActive(false);
               setIsConnecting(false);
               setCurrentCall(null);
-              setError('Call failed');
+              setError('Call failed - Check SIP credentials and outbound voice profile');
+              break;
+            default:
+              console.log('Unknown call state:', call.state);
+              if (call.state.includes('fail') || call.state.includes('error')) {
+                setIsCallActive(false);
+                setIsConnecting(false);
+                setCurrentCall(null);
+                setError(`Call failed: ${call.state}`);
+              }
               break;
           }
         }
@@ -110,6 +123,7 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     try {
       setIsConnecting(true);
       setError(null);
+      console.log('Attempting to make call to:', phoneNumber);
 
       const call = client.newCall({
         destinationNumber: phoneNumber,
@@ -117,12 +131,22 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
       });
 
       setCurrentCall(call);
+
+      // Set a timeout to catch silent failures
+      setTimeout(() => {
+        if (isConnecting && !isCallActive) {
+          console.log('Call timeout - no response after 10 seconds');
+          setIsConnecting(false);
+          setError('Call timeout - Check your Telnyx configuration');
+        }
+      }, 10000);
+
     } catch (err: any) {
       console.error('Failed to make call:', err);
       setError(err.message || 'Failed to make call');
       setIsConnecting(false);
     }
-  }, [client, isConnected, config.sipUsername]);
+  }, [client, isConnected, config.sipUsername, isConnecting, isCallActive]);
 
   // Hang up call
   const hangupCall = useCallback(() => {

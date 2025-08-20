@@ -116,21 +116,11 @@ export default function Home() {
         onDigitPress={handleDigitPress}
         onCall={handleCall}
         onHangup={handleHangup}
+        onClear={handleClearNumber}
         isCallActive={isCallActive}
         isConnecting={isConnecting}
       />
 
-      {/* Clear Button */}
-      {phoneNumber && !isCallActive && (
-        <div className="mt-4 text-center">
-          <button
-            onClick={handleClearNumber}
-            className="px-4 py-2 text-gray-600 hover:text-gray-800 text-sm"
-          >
-            Clear
-          </button>
-        </div>
-      )}
 
       {/* Instructions */}
       <div className="mt-8 text-center text-sm text-gray-500">
