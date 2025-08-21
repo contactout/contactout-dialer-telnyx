@@ -164,13 +164,14 @@ export const useTelnyxWebRTC = (
                 }
                 break;
               case "ended":
+              case "hangup":
+              case "destroy":
+                console.log("Call ended:", call.state);
                 setIsCallActive(false);
                 setIsConnecting(false);
                 setCurrentCall(null);
                 setCallControlId(null);
-                setError(
-                  "Call ended - Check SIP credentials and outbound voice profile"
-                );
+                setError(null); // Clear any previous errors
                 cleanupAudio();
                 stopCallStreaming();
                 // Notify parent of call end
@@ -204,6 +205,41 @@ export const useTelnyxWebRTC = (
                 }
                 break;
             }
+          }
+        });
+
+        // Add specific event listeners for better call state handling
+        telnyxClient.on("call.hangup", (call: any) => {
+          console.log("Call hangup event received");
+          setIsCallActive(false);
+          setIsConnecting(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          setError(null);
+          cleanupAudio();
+          stopCallStreaming();
+          if (onCallStatusChange) {
+            onCallStatusChange(
+              "completed",
+              call.phoneNumber || config.phoneNumber
+            );
+          }
+        });
+
+        telnyxClient.on("call.destroy", (call: any) => {
+          console.log("Call destroy event received");
+          setIsCallActive(false);
+          setIsConnecting(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          setError(null);
+          cleanupAudio();
+          stopCallStreaming();
+          if (onCallStatusChange) {
+            onCallStatusChange(
+              "completed",
+              call.phoneNumber || config.phoneNumber
+            );
           }
         });
 
@@ -777,11 +813,21 @@ export const useTelnyxWebRTC = (
   const hangupCall = useCallback(() => {
     if (currentCall) {
       try {
+        console.log("Attempting to hang up call");
         currentCall.hangup();
       } catch (err) {
         console.error("Failed to hang up call:", err);
+        // Even if hangup fails, we should clean up our local state
       }
     }
+
+    // Always clean up our local state and resources
+    console.log("Cleaning up call resources");
+    setIsCallActive(false);
+    setIsConnecting(false);
+    setCurrentCall(null);
+    setCallControlId(null);
+    setError(null); // Clear any errors
     cleanupAudio();
     stopCallStreaming();
   }, [currentCall, cleanupAudio, stopCallStreaming]);

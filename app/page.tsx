@@ -116,8 +116,8 @@ export default function Home() {
     clearHistory();
   };
 
-  // Show calling screen when connecting
-  if (isConnecting) {
+  // Show calling screen when connecting OR when call is active
+  if (isConnecting || isCallActive) {
     const callingComponent = (
       <div className="w-full">
         {/* User Info and Logout */}

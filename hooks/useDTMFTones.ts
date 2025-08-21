@@ -21,6 +21,33 @@ export const useDTMFTones = () => {
   const [volume, setVolume] = useState(0.3); // Default volume at 30%
   const [enabled, setEnabled] = useState(true); // Default enabled
 
+  const initializeAudioContext = useCallback(() => {
+    try {
+      if (!audioContextRef.current) {
+        console.log("Initializing AudioContext on user interaction");
+        audioContextRef.current = new (window.AudioContext ||
+          (window as any).webkitAudioContext)();
+
+        // Resume the context
+        if (audioContextRef.current.state === "suspended") {
+          audioContextRef.current
+            .resume()
+            .then(() => {
+              console.log("AudioContext initialized and resumed successfully");
+            })
+            .catch((err) => {
+              console.error(
+                "Failed to resume AudioContext during initialization:",
+                err
+              );
+            });
+        }
+      }
+    } catch (error) {
+      console.error("Failed to initialize AudioContext:", error);
+    }
+  }, []);
+
   const playTone = useCallback(
     (digit: string) => {
       console.log("Attempting to play DTMF tone for digit:", digit);
@@ -119,5 +146,13 @@ export const useDTMFTones = () => {
     }
   }, []);
 
-  return { playTone, cleanup, volume, updateVolume, enabled, toggleEnabled };
+  return {
+    playTone,
+    cleanup,
+    volume,
+    updateVolume,
+    enabled,
+    toggleEnabled,
+    initializeAudioContext,
+  };
 };
