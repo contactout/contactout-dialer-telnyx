@@ -65,6 +65,32 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
           password: config.sipPassword,
         });
 
+        // Debug: Log available methods on the client
+        console.log("Telnyx client created:", telnyxClient);
+        console.log(
+          "Available methods:",
+          Object.getOwnPropertyNames(Object.getPrototypeOf(telnyxClient))
+        );
+        console.log(
+          "Has newCall method:",
+          typeof telnyxClient.newCall === "function"
+        );
+        console.log("Has on method:", typeof telnyxClient.on === "function");
+
+        // Check for alternative method names
+        console.log(
+          "Has call method:",
+          typeof (telnyxClient as any).call === "function"
+        );
+        console.log(
+          "Has createCall method:",
+          typeof (telnyxClient as any).createCall === "function"
+        );
+        console.log(
+          "Has addEventListener method:",
+          typeof (telnyxClient as any).addEventListener === "function"
+        );
+
         // Set up event listeners
         telnyxClient.on("telnyx.ready", () => {
           console.log("Telnyx client ready");
@@ -230,48 +256,14 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
       console.log("Starting call streaming for:", callControlId);
 
       // Create WebSocket connection for streaming audio
-      const wsUrl = `wss://api.telnyx.com/v2/calls/${callControlId}/streaming`;
-      websocketRef.current = new WebSocket(wsUrl);
+      // Note: This requires proper authentication headers which WebSocket doesn't support
+      // We'll use the Telnyx SDK's built-in audio handling instead
+      console.log(
+        "Using Telnyx SDK built-in audio streaming instead of WebSocket API"
+      );
 
-      websocketRef.current.onopen = () => {
-        console.log("WebSocket connection opened for streaming");
-
-        // Send streaming start command
-        const streamingCommand = {
-          command: "streaming_start",
-          stream_url: wsUrl,
-          stream_track: "both_tracks",
-          stream_codec: "default",
-          stream_bidirectional_mode: "rtp",
-          stream_bidirectional_codec: "PCMU",
-          stream_bidirectional_target_legs: "both",
-        };
-
-        websocketRef.current?.send(JSON.stringify(streamingCommand));
-      };
-
-      websocketRef.current.onmessage = (event) => {
-        try {
-          const data = JSON.parse(event.data);
-          console.log("Streaming message received:", data);
-
-          // Handle audio stream data
-          if (data.type === "audio" && data.payload) {
-            handleAudioStreamData(data.payload);
-          }
-        } catch (err) {
-          console.error("Failed to parse streaming message:", err);
-        }
-      };
-
-      websocketRef.current.onerror = (error) => {
-        console.error("WebSocket streaming error:", error);
-        setError("Failed to establish audio streaming");
-      };
-
-      websocketRef.current.onclose = () => {
-        console.log("WebSocket streaming connection closed");
-      };
+      // The Telnyx WebRTC SDK should handle audio streams automatically
+      // We just need to ensure our audio elements are properly connected
     } catch (err) {
       console.error("Failed to start call streaming:", err);
       setError("Failed to start audio streaming");
@@ -379,6 +371,165 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     }
   }, []);
 
+  // Set up audio streams for an active call
+  const setupCallAudioStreams = useCallback((call: any) => {
+    try {
+      console.log("Setting up audio streams for call:", call);
+
+      // Create audio elements if they don't exist
+      if (!localAudioRef.current) {
+        localAudioRef.current = document.createElement("audio");
+        localAudioRef.current.autoplay = true;
+        localAudioRef.current.muted = true; // Mute local audio to prevent feedback
+        document.body.appendChild(localAudioRef.current);
+      }
+
+      if (!remoteAudioRef.current) {
+        remoteAudioRef.current = document.createElement("audio");
+        remoteAudioRef.current.autoplay = true;
+        remoteAudioRef.current.volume = 1.0;
+        remoteAudioRef.current.muted = false; // Ensure remote audio is NOT muted
+        document.body.appendChild(remoteAudioRef.current);
+      }
+
+      // Set up local audio stream (microphone) - this is crucial for them to hear you
+      if (localStreamRef.current) {
+        localAudioRef.current.srcObject = localStreamRef.current;
+        console.log("Local audio stream (microphone) connected to call");
+
+        // Ensure the local stream is also connected to the call for outbound audio
+        if (call.addTrack && typeof call.addTrack === "function") {
+          const audioTrack = localStreamRef.current.getAudioTracks()[0];
+          if (audioTrack) {
+            call.addTrack(audioTrack);
+            console.log("Local audio track added to call for outbound audio");
+          }
+        }
+      }
+
+      // CRITICAL: Set up remote audio stream from the call - this is for you to hear them
+      // Try multiple approaches to get the remote stream
+      let remoteStreamFound = false;
+
+      // Method 1: Check if call already has remoteStream
+      if (call.remoteStream) {
+        console.log("Remote stream found on call object:", call.remoteStream);
+        remoteAudioRef.current.srcObject = call.remoteStream;
+        remoteStreamFound = true;
+      }
+
+      // Method 2: Try getRemoteStream method
+      if (
+        !remoteStreamFound &&
+        call.getRemoteStream &&
+        typeof call.getRemoteStream === "function"
+      ) {
+        try {
+          const remoteStream = call.getRemoteStream();
+          if (remoteStream) {
+            console.log(
+              "Remote stream obtained via getRemoteStream:",
+              remoteStream
+            );
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteStreamFound = true;
+          }
+        } catch (err) {
+          console.error("getRemoteStream failed:", err);
+        }
+      }
+
+      // Method 3: Check if call has a peerConnection with remote tracks
+      if (!remoteStreamFound && call.peerConnection) {
+        try {
+          const pc = call.peerConnection;
+          const remoteTracks = pc
+            .getReceivers()
+            .map((receiver: any) => receiver.track)
+            .filter((track: any) => track && track.kind === "audio");
+          if (remoteTracks.length > 0) {
+            const remoteStream = new MediaStream(remoteTracks);
+            console.log(
+              "Remote stream created from peer connection tracks:",
+              remoteStream
+            );
+            remoteAudioRef.current.srcObject = remoteStream;
+            remoteStreamFound = true;
+          }
+        } catch (err) {
+          console.error(
+            "Failed to get remote tracks from peer connection:",
+            err
+          );
+        }
+      }
+
+      if (!remoteStreamFound) {
+        console.warn(
+          "No remote stream found initially - will wait for remoteStream event"
+        );
+      }
+
+      // Set up call event handlers for dynamic audio streams
+      try {
+        call.on("remoteStream", (stream: MediaStream) => {
+          console.log("Remote stream received dynamically:", stream);
+          if (remoteAudioRef.current && stream) {
+            remoteAudioRef.current.srcObject = stream;
+            console.log("Remote audio stream connected for inbound audio");
+
+            // Test if audio is actually playing
+            remoteAudioRef.current
+              .play()
+              .then(() => {
+                console.log("Remote audio started playing successfully");
+              })
+              .catch((err) => {
+                console.error("Failed to play remote audio:", err);
+              });
+          }
+        });
+      } catch (err) {
+        console.error("Failed to set up remoteStream event handler:", err);
+      }
+
+      try {
+        call.on("localStream", (stream: MediaStream) => {
+          console.log("Local stream received dynamically:", stream);
+          if (localAudioRef.current) {
+            localAudioRef.current.srcObject = stream;
+          }
+        });
+      } catch (err) {
+        console.error("Failed to set up localStream event handler:", err);
+      }
+
+      // Additional event handlers for Telnyx specific events
+      try {
+        call.on("track", (event: any) => {
+          console.log("Track event received:", event);
+          if (
+            event.track &&
+            event.track.kind === "audio" &&
+            event.track.direction === "recvonly"
+          ) {
+            console.log("Remote audio track received:", event.track);
+            const remoteStream = new MediaStream([event.track]);
+            if (remoteAudioRef.current) {
+              remoteAudioRef.current.srcObject = remoteStream;
+              console.log("Remote audio track connected to audio element");
+            }
+          }
+        });
+      } catch (err) {
+        console.error("Failed to set up track event handler:", err);
+      }
+    } catch (err) {
+      console.error("Failed to set up call audio streams:", err);
+      setError("Failed to set up audio streams for call");
+    }
+  }, []);
+
   // Clean up audio elements and streams
   const cleanupAudio = useCallback(() => {
     if (localAudioRef.current) {
@@ -420,69 +571,139 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
         setError(null);
         console.log("Attempting to make call to:", phoneNumber);
 
+        const handleCallCreation = (call: any) => {
+          // Validate that call object is created and has required methods
+          if (!call || typeof call !== "object") {
+            throw new Error("Failed to create call object");
+          }
+
+          if (typeof call.on !== "function") {
+            throw new Error("Call object does not have event handling method");
+          }
+
+          console.log("Call object created:", call);
+
+          // Set up call event handlers with proper error handling
+          try {
+            call.on("ringing", () => {
+              console.log("Call is ringing - setting connecting state");
+              setIsConnecting(true);
+              setIsCallActive(false);
+              setCurrentCall(call);
+              setError(null); // Clear any previous errors
+
+              // Extract call control ID
+              if (call.call_control_id) {
+                setCallControlId(call.call_control_id);
+              }
+            });
+          } catch (err) {
+            console.error("Failed to set up ringing event handler:", err);
+          }
+
+          try {
+            call.on("answered", () => {
+              console.log("Call answered - setting active state");
+              setIsConnecting(false);
+              setIsCallActive(true);
+              setCurrentCall(call);
+              setError(null);
+
+              // Extract call control ID if not already set
+              if (call.call_control_id && !callControlId) {
+                setCallControlId(call.call_control_id);
+              }
+
+              // Set up audio streams immediately when call is answered
+              setupCallAudioStreams(call);
+
+              // Debug audio setup after a short delay
+              setTimeout(() => {
+                debugAudioSetup();
+              }, 1000);
+
+              // Start call streaming to receive audio
+              if (call.call_control_id) {
+                startCallStreaming(call.call_control_id);
+              }
+            });
+          } catch (err) {
+            console.error("Failed to set up answered event handler:", err);
+          }
+
+          try {
+            call.on("ended", () => {
+              console.log("Call ended");
+              setIsCallActive(false);
+              setIsConnecting(false);
+              setCurrentCall(null);
+              setCallControlId(null);
+              cleanupAudio();
+              stopCallStreaming();
+            });
+          } catch (err) {
+            console.error("Failed to set up ended event handler:", err);
+          }
+
+          try {
+            call.on("remoteStream", (stream: MediaStream) => {
+              console.log("Remote stream received:", stream);
+              if (remoteAudioRef.current) {
+                remoteAudioRef.current.srcObject = stream;
+              }
+            });
+          } catch (err) {
+            console.error("Failed to set up remoteStream event handler:", err);
+          }
+
+          setCurrentCall(call);
+
+          // Set a timeout to catch silent failures
+          setTimeout(() => {
+            if (isConnecting && !isCallActive) {
+              console.log("Call timeout - no response after 10 seconds");
+              setIsConnecting(false);
+              setError("Call timeout - Check your Telnyx configuration");
+            }
+          }, 10000);
+        };
+
+        // Validate that client has newCall method
+        if (typeof client.newCall !== "function") {
+          // Try alternative method names
+          if (typeof (client as any).call === "function") {
+            console.log("Using client.call method instead of newCall");
+            const call = (client as any).call({
+              destinationNumber: phoneNumber,
+              callerNumber: config.phoneNumber,
+            });
+            return handleCallCreation(call);
+          } else if (typeof (client as any).createCall === "function") {
+            console.log("Using client.createCall method instead of newCall");
+            const call = (client as any).createCall({
+              destinationNumber: phoneNumber,
+              callerNumber: config.phoneNumber,
+            });
+            return handleCallCreation(call);
+          } else {
+            throw new Error(
+              "Telnyx client does not have newCall, call, or createCall method"
+            );
+          }
+        }
+
         const call = client.newCall({
           destinationNumber: phoneNumber,
           callerNumber: config.phoneNumber,
         });
 
-        // Set up call event handlers
-        call.on("ringing", () => {
-          console.log("Call is ringing");
-          setIsConnecting(true);
-          setIsCallActive(false);
-          setCurrentCall(call);
-
-          // Extract call control ID
-          if (call.call_control_id) {
-            setCallControlId(call.call_control_id);
-          }
-        });
-
-        call.on("answered", () => {
-          console.log("Call answered");
-          setIsConnecting(false);
-          setIsCallActive(true);
-          setCurrentCall(call);
-          setError(null);
-
-          // Extract call control ID if not already set
-          if (call.call_control_id && !callControlId) {
-            setCallControlId(call.call_control_id);
-          }
-
-          // Start call streaming to receive audio
-          if (call.call_control_id) {
-            startCallStreaming(call.call_control_id);
-          }
-        });
-
-        call.on("ended", () => {
-          console.log("Call ended");
-          setIsCallActive(false);
-          setIsConnecting(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          cleanupAudio();
-          stopCallStreaming();
-        });
-
-        call.on("remoteStream", (stream: MediaStream) => {
-          console.log("Remote stream received:", stream);
-          if (remoteAudioRef.current) {
-            remoteAudioRef.current.srcObject = stream;
-          }
-        });
-
+        // Immediately set connecting state for better UX
+        console.log("Call initiated - setting connecting state immediately");
+        setIsConnecting(true);
+        setIsCallActive(false);
         setCurrentCall(call);
 
-        // Set a timeout to catch silent failures
-        setTimeout(() => {
-          if (isConnecting && !isCallActive) {
-            console.log("Call timeout - no response after 10 seconds");
-            setIsConnecting(false);
-            setError("Call timeout - Check your Telnyx configuration");
-          }
-        }, 10000);
+        return handleCallCreation(call);
       } catch (err: any) {
         console.error("Failed to make call:", err);
         setError(err.message || "Failed to make call");
@@ -531,6 +752,44 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     [currentCall, isCallActive]
   );
 
+  // Debug function to check audio setup
+  const debugAudioSetup = useCallback(() => {
+    console.log("=== AUDIO SETUP DEBUG ===");
+    console.log("Local audio element:", localAudioRef.current);
+    console.log("Remote audio element:", remoteAudioRef.current);
+    console.log("Local stream:", localStreamRef.current);
+    console.log("Current call:", currentCall);
+
+    if (localAudioRef.current) {
+      console.log("Local audio muted:", localAudioRef.current.muted);
+      console.log("Local audio srcObject:", localAudioRef.current.srcObject);
+    }
+
+    if (remoteAudioRef.current) {
+      console.log("Remote audio muted:", remoteAudioRef.current.muted);
+      console.log("Remote audio srcObject:", remoteAudioRef.current.srcObject);
+      console.log("Remote audio volume:", remoteAudioRef.current.volume);
+      console.log(
+        "Remote audio readyState:",
+        remoteAudioRef.current.readyState
+      );
+    }
+
+    if (currentCall) {
+      console.log("Call object:", currentCall);
+      console.log("Call remoteStream:", (currentCall as any).remoteStream);
+      console.log(
+        "Call has getRemoteStream:",
+        typeof (currentCall as any).getRemoteStream === "function"
+      );
+      console.log(
+        "Call has peerConnection:",
+        (currentCall as any).peerConnection
+      );
+    }
+    console.log("=== END AUDIO DEBUG ===");
+  }, [currentCall]);
+
   return {
     isConnected,
     isCallActive,
@@ -541,5 +800,6 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     makeCall,
     hangupCall,
     sendDTMF,
+    debugAudioSetup,
   };
 };

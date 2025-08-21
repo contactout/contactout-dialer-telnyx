@@ -34,6 +34,7 @@ export default function Home() {
     makeCall,
     hangupCall,
     sendDTMF,
+    debugAudioSetup,
   } = useTelnyxWebRTC(telnyxConfig);
 
   // Show loading spinner while checking auth
@@ -97,8 +98,9 @@ export default function Home() {
           </button>
         </div>
 
-        {/* Connection Status */}
-        <div className="mb-4 text-center">
+        {/* Connection Status and Controls - All on one line */}
+        <div className="mb-4 flex items-center justify-center gap-3 flex-wrap">
+          {/* Connection Status */}
           <div
             className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
               isConnected
@@ -115,41 +117,54 @@ export default function Home() {
           </div>
 
           {/* Microphone Status */}
-          <div className="mt-2">
+          <div
+            className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+              hasMicrophoneAccess
+                ? "bg-green-100 text-green-800"
+                : "bg-red-100 text-red-800"
+            }`}
+          >
             <div
-              className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-                hasMicrophoneAccess
-                  ? "bg-green-100 text-green-800"
-                  : "bg-red-100 text-red-800"
+              className={`w-2 h-2 rounded-full mr-2 ${
+                hasMicrophoneAccess ? "bg-green-500" : "bg-red-500"
               }`}
-            >
-              <div
-                className={`w-2 h-2 rounded-full mr-2 ${
-                  hasMicrophoneAccess ? "bg-green-500" : "bg-red-500"
-                }`}
-              ></div>
-              {hasMicrophoneAccess
-                ? "Microphone Ready"
-                : "Microphone Access Required"}
-            </div>
+            ></div>
+            {hasMicrophoneAccess ? "Microphone Ready" : "Microphone Required"}
           </div>
 
           {/* Call Control Status */}
           {callControlId && (
-            <div className="mt-2">
-              <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
-                <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
-                Call Streaming Active
-              </div>
-              <div className="text-xs text-blue-600 mt-1">
-                ID: {callControlId.slice(0, 8)}...
-              </div>
+            <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
+              <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
+              Call Streaming Active
             </div>
           )}
         </div>
 
         {/* Calling Screen */}
         <CallingScreen phoneNumber={phoneNumber} onHangup={handleHangup} />
+
+        {/* Debug Audio Button */}
+        <div className="mt-4 text-center">
+          <button
+            onClick={debugAudioSetup}
+            className="inline-flex items-center px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg transition-colors"
+            title="Debug Audio Setup"
+          >
+            <svg
+              className="w-4 h-4 mr-2"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+                clipRule="evenodd"
+              />
+            </svg>
+            Debug Audio
+          </button>
+        </div>
       </div>
     );
 
@@ -181,8 +196,9 @@ export default function Home() {
         </button>
       </div>
 
-      {/* Connection Status */}
-      <div className="mb-4 text-center">
+      {/* Connection Status and Controls - All on one line */}
+      <div className="mb-4 flex items-center justify-center gap-3 flex-wrap">
+        {/* Connection Status */}
         <div
           className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
             isConnected
@@ -199,51 +215,25 @@ export default function Home() {
         </div>
 
         {/* Microphone Status */}
-        <div className="mt-2">
+        <div
+          className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+            hasMicrophoneAccess
+              ? "bg-green-100 text-green-800"
+              : "bg-red-100 text-red-800"
+          }`}
+        >
           <div
-            className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-              hasMicrophoneAccess
-                ? "bg-green-100 text-green-800"
-                : "bg-red-100 text-red-800"
+            className={`w-2 h-2 rounded-full mr-2 ${
+              hasMicrophoneAccess ? "bg-green-500" : "bg-red-500"
             }`}
-          >
-            <div
-              className={`w-2 h-2 rounded-full mr-2 ${
-                hasMicrophoneAccess ? "bg-green-500" : "bg-red-500"
-              }`}
-            ></div>
-            {hasMicrophoneAccess
-              ? "Microphone Ready"
-              : "Microphone Access Required"}
-          </div>
+          ></div>
+          {hasMicrophoneAccess ? "Microphone Ready" : "Microphone Required"}
         </div>
 
-        {/* Call Control Status */}
-        {callControlId && (
-          <div className="mt-2">
-            <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
-              <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
-              Call Streaming Active
-            </div>
-            <div className="text-xs text-blue-600 mt-1">
-              ID: {callControlId.slice(0, 8)}...
-            </div>
-          </div>
-        )}
-      </div>
-
-      {/* Error Display */}
-      {error && (
-        <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm text-center">
-          {error}
-        </div>
-      )}
-
-      {/* Audio Test Button */}
-      <div className="mb-4 text-center">
+        {/* Audio Test Button */}
         <button
           onClick={() => setShowAudioTest(true)}
-          className="inline-flex items-center px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors"
+          className="inline-flex items-center px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-full transition-colors"
         >
           <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
             <path
@@ -254,7 +244,38 @@ export default function Home() {
           </svg>
           Test Microphone
         </button>
+
+        {/* Debug Audio Button */}
+        <button
+          onClick={debugAudioSetup}
+          className="inline-flex items-center px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-full transition-colors"
+          title="Debug Audio Setup"
+        >
+          <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Debug Audio
+        </button>
+
+        {/* Call Control Status */}
+        {callControlId && (
+          <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
+            <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
+            Call Streaming Active
+          </div>
+        )}
       </div>
+
+      {/* Error Display */}
+      {error && (
+        <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm text-center">
+          {error}
+        </div>
+      )}
 
       {/* Dial Pad */}
       <DialPad
