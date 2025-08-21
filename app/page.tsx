@@ -5,12 +5,14 @@ import DialPad from "@/components/DialPad";
 import PhoneMockup from "@/components/PhoneMockup";
 import LoginScreen from "@/components/LoginScreen";
 import CallingScreen from "@/components/CallingScreen";
+import AudioTest from "@/components/AudioTest";
 import { useDeviceDetection } from "@/hooks/useDeviceDetection";
 import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { useAuth } from "@/contexts/AuthContext";
 
 export default function Home() {
   const [phoneNumber, setPhoneNumber] = useState("");
+  const [showAudioTest, setShowAudioTest] = useState(false);
   const { isMobile } = useDeviceDetection();
   const { user, loading, signOut } = useAuth();
 
@@ -27,6 +29,7 @@ export default function Home() {
     isCallActive,
     isConnecting,
     error,
+    hasMicrophoneAccess,
     makeCall,
     hangupCall,
     sendDTMF,
@@ -109,6 +112,26 @@ export default function Home() {
             ></div>
             {isConnected ? "Connected" : "Disconnected"}
           </div>
+
+          {/* Microphone Status */}
+          <div className="mt-2">
+            <div
+              className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+                hasMicrophoneAccess
+                  ? "bg-green-100 text-green-800"
+                  : "bg-red-100 text-red-800"
+              }`}
+            >
+              <div
+                className={`w-2 h-2 rounded-full mr-2 ${
+                  hasMicrophoneAccess ? "bg-green-500" : "bg-red-500"
+                }`}
+              ></div>
+              {hasMicrophoneAccess
+                ? "Microphone Ready"
+                : "Microphone Access Required"}
+            </div>
+          </div>
         </div>
 
         {/* Calling Screen */}
@@ -160,6 +183,26 @@ export default function Home() {
           ></div>
           {isConnected ? "Connected" : "Disconnected"}
         </div>
+
+        {/* Microphone Status */}
+        <div className="mt-2">
+          <div
+            className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+              hasMicrophoneAccess
+                ? "bg-green-100 text-green-800"
+                : "bg-red-100 text-red-800"
+            }`}
+          >
+            <div
+              className={`w-2 h-2 rounded-full mr-2 ${
+                hasMicrophoneAccess ? "bg-green-500" : "bg-red-500"
+              }`}
+            ></div>
+            {hasMicrophoneAccess
+              ? "Microphone Ready"
+              : "Microphone Access Required"}
+          </div>
+        </div>
       </div>
 
       {/* Error Display */}
@@ -168,6 +211,23 @@ export default function Home() {
           {error}
         </div>
       )}
+
+      {/* Audio Test Button */}
+      <div className="mb-4 text-center">
+        <button
+          onClick={() => setShowAudioTest(true)}
+          className="inline-flex items-center px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors"
+        >
+          <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z"
+              clipRule="evenodd"
+            />
+          </svg>
+          Test Microphone
+        </button>
+      </div>
 
       {/* Dial Pad */}
       <DialPad
@@ -202,6 +262,8 @@ export default function Home() {
       ) : (
         <PhoneMockup>{dialPadComponent}</PhoneMockup>
       )}
+      {/* Audio Test Modal */}
+      {showAudioTest && <AudioTest onClose={() => setShowAudioTest(false)} />}
     </main>
   );
 }

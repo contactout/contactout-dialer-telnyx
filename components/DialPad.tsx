@@ -1,4 +1,6 @@
-import React from "react";
+import React, { useState } from "react";
+import { useDTMFTones } from "@/hooks/useDTMFTones";
+import DTMFSettings from "./DTMFSettings";
 
 interface DialPadProps {
   phoneNumber: string;
@@ -19,6 +21,10 @@ const DialPad: React.FC<DialPadProps> = ({
   isCallActive,
   isConnecting,
 }) => {
+  const { playTone, volume, updateVolume, enabled, toggleEnabled } =
+    useDTMFTones();
+  const [showSettings, setShowSettings] = useState(false);
+
   const digits = [
     ["1", "2", "3"],
     ["4", "5", "6"],
@@ -27,6 +33,10 @@ const DialPad: React.FC<DialPadProps> = ({
   ];
 
   const handleDigitClick = (digit: string) => {
+    // Play DTMF tone for audio feedback
+    playTone(digit);
+
+    // Add digit to phone number
     onDigitPress(digit);
   };
 
@@ -36,6 +46,29 @@ const DialPad: React.FC<DialPadProps> = ({
       <div className="mb-6 p-4 bg-gray-100 rounded-lg text-center">
         <div className="text-2xl font-mono text-gray-800 min-h-[2rem]">
           {phoneNumber || "Enter number"}
+        </div>
+      </div>
+
+      {/* DTMF Settings Button */}
+      <div className="mb-4 text-center">
+        <button
+          onClick={() => setShowSettings(true)}
+          className="inline-flex items-center px-3 py-2 bg-gray-500 hover:bg-gray-600 text-white text-sm font-medium rounded-lg transition-colors"
+          title="DTMF Tone Settings"
+        >
+          <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
+            <path
+              fillRule="evenodd"
+              d="M11.49 3.17c-.38-1.56-2.6-1.56-2.98 0a1.532 1.532 0 01-2.286.948c-1.372-.836-2.942.734-2.106 2.106.54.886.061 2.042-.947 2.287-1.561.379-1.561 2.6 0 2.978a1.532 1.532 0 01.947 2.287c-.836 1.372.734 2.942 2.106 2.106a1.532 1.532 0 012.287.947c.379 1.561 2.6 1.561 2.978 0a1.533 1.533 0 012.287-.947c1.372.836 2.942-.734 2.106-2.106a1.533 1.533 0 01.947-2.287c1.561-.379 1.561-2.6 0-2.978a1.532 1.532 0 01-.947-2.287c.836-1.372-.734-2.942-2.106-2.106a1.532 1.532 0 01-2.287-.947zM10 13a3 3 0 100-6 3 3 0 000 6z"
+              clipRule="evenodd"
+            />
+          </svg>
+          DTMF Settings
+        </button>
+
+        {/* Quick Status Indicator */}
+        <div className="mt-2 text-xs text-gray-500">
+          {enabled ? `Tones: ${Math.round(volume * 100)}%` : "Tones: Disabled"}
         </div>
       </div>
 
@@ -93,6 +126,17 @@ const DialPad: React.FC<DialPadProps> = ({
             Call Active
           </div>
         </div>
+      )}
+
+      {/* DTMF Settings Modal */}
+      {showSettings && (
+        <DTMFSettings
+          volume={volume}
+          onVolumeChange={updateVolume}
+          enabled={enabled}
+          onToggleEnabled={toggleEnabled}
+          onClose={() => setShowSettings(false)}
+        />
       )}
     </div>
   );
