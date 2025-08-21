@@ -1,24 +1,25 @@
-'use client';
+"use client";
 
-import { useState } from 'react';
-import DialPad from '@/components/DialPad';
-import PhoneMockup from '@/components/PhoneMockup';
-import LoginScreen from '@/components/LoginScreen';
-import { useDeviceDetection } from '@/hooks/useDeviceDetection';
-import { useTelnyxWebRTC } from '@/hooks/useTelnyxWebRTC';
-import { useAuth } from '@/contexts/AuthContext';
+import { useState } from "react";
+import DialPad from "@/components/DialPad";
+import PhoneMockup from "@/components/PhoneMockup";
+import LoginScreen from "@/components/LoginScreen";
+import CallingScreen from "@/components/CallingScreen";
+import { useDeviceDetection } from "@/hooks/useDeviceDetection";
+import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
+import { useAuth } from "@/contexts/AuthContext";
 
 export default function Home() {
-  const [phoneNumber, setPhoneNumber] = useState('');
+  const [phoneNumber, setPhoneNumber] = useState("");
   const { isMobile } = useDeviceDetection();
   const { user, loading, signOut } = useAuth();
 
   // Telnyx configuration from environment variables
   const telnyxConfig = {
-    apiKey: process.env.NEXT_PUBLIC_TELNYX_API_KEY || '',
-    sipUsername: process.env.NEXT_PUBLIC_TELNYX_SIP_USERNAME || '',
-    sipPassword: process.env.NEXT_PUBLIC_TELNYX_SIP_PASSWORD || '',
-    phoneNumber: process.env.NEXT_PUBLIC_TELNYX_PHONE_NUMBER || '',
+    apiKey: process.env.NEXT_PUBLIC_TELNYX_API_KEY || "",
+    sipUsername: process.env.NEXT_PUBLIC_TELNYX_SIP_USERNAME || "",
+    sipPassword: process.env.NEXT_PUBLIC_TELNYX_SIP_PASSWORD || "",
+    phoneNumber: process.env.NEXT_PUBLIC_TELNYX_PHONE_NUMBER || "",
   };
 
   const {
@@ -54,7 +55,7 @@ export default function Home() {
       sendDTMF(digit);
     } else {
       // Add digit to phone number
-      setPhoneNumber(prev => prev + digit);
+      setPhoneNumber((prev) => prev + digit);
     }
   };
 
@@ -66,14 +67,67 @@ export default function Home() {
 
   const handleHangup = () => {
     hangupCall();
-    setPhoneNumber('');
+    setPhoneNumber("");
   };
 
   const handleClearNumber = () => {
     if (!isCallActive) {
-      setPhoneNumber('');
+      setPhoneNumber("");
     }
   };
+
+  // Show calling screen when connecting
+  if (isConnecting) {
+    const callingComponent = (
+      <div className="w-full">
+        {/* User Info and Logout */}
+        <div className="mb-4 flex justify-between items-center">
+          <div className="text-sm text-gray-600">
+            Welcome, {user.user_metadata?.full_name || user.email}
+          </div>
+          <button
+            onClick={signOut}
+            className="text-sm text-gray-500 hover:text-gray-700 underline"
+          >
+            Sign out
+          </button>
+        </div>
+
+        {/* Connection Status */}
+        <div className="mb-4 text-center">
+          <div
+            className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+              isConnected
+                ? "bg-green-100 text-green-800"
+                : "bg-red-100 text-red-800"
+            }`}
+          >
+            <div
+              className={`w-2 h-2 rounded-full mr-2 ${
+                isConnected ? "bg-green-500" : "bg-red-500"
+              }`}
+            ></div>
+            {isConnected ? "Connected" : "Disconnected"}
+          </div>
+        </div>
+
+        {/* Calling Screen */}
+        <CallingScreen phoneNumber={phoneNumber} onHangup={handleHangup} />
+      </div>
+    );
+
+    return (
+      <main className="min-h-screen">
+        {isMobile ? (
+          <div className="p-6 flex flex-col justify-center min-h-screen bg-gray-50">
+            {callingComponent}
+          </div>
+        ) : (
+          <PhoneMockup>{callingComponent}</PhoneMockup>
+        )}
+      </main>
+    );
+  }
 
   const dialPadComponent = (
     <div className="w-full">
@@ -92,15 +146,19 @@ export default function Home() {
 
       {/* Connection Status */}
       <div className="mb-4 text-center">
-        <div className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-          isConnected 
-            ? 'bg-green-100 text-green-800' 
-            : 'bg-red-100 text-red-800'
-        }`}>
-          <div className={`w-2 h-2 rounded-full mr-2 ${
-            isConnected ? 'bg-green-500' : 'bg-red-500'
-          }`}></div>
-          {isConnected ? 'Connected' : 'Disconnected'}
+        <div
+          className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+            isConnected
+              ? "bg-green-100 text-green-800"
+              : "bg-red-100 text-red-800"
+          }`}
+        >
+          <div
+            className={`w-2 h-2 rounded-full mr-2 ${
+              isConnected ? "bg-green-500" : "bg-red-500"
+            }`}
+          ></div>
+          {isConnected ? "Connected" : "Disconnected"}
         </div>
       </div>
 
@@ -122,7 +180,6 @@ export default function Home() {
         isConnecting={isConnecting}
       />
 
-
       {/* Instructions */}
       <div className="mt-8 text-center text-sm text-gray-500">
         {!isConnected && (
@@ -131,9 +188,7 @@ export default function Home() {
         {isConnected && !isCallActive && (
           <p>Enter a phone number and press Call</p>
         )}
-        {isCallActive && (
-          <p>Use the dial pad to send DTMF tones</p>
-        )}
+        {isCallActive && <p>Use the dial pad to send DTMF tones</p>}
       </div>
     </div>
   );
@@ -145,9 +200,7 @@ export default function Home() {
           {dialPadComponent}
         </div>
       ) : (
-        <PhoneMockup>
-          {dialPadComponent}
-        </PhoneMockup>
+        <PhoneMockup>{dialPadComponent}</PhoneMockup>
       )}
     </main>
   );

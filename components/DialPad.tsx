@@ -1,4 +1,4 @@
-import React from 'react';
+import React from "react";
 
 interface DialPadProps {
   phoneNumber: string;
@@ -20,10 +20,10 @@ const DialPad: React.FC<DialPadProps> = ({
   isConnecting,
 }) => {
   const digits = [
-    ['1', '2', '3'],
-    ['4', '5', '6'],
-    ['7', '8', '9'],
-    ['*', '0', '#'],
+    ["1", "2", "3"],
+    ["4", "5", "6"],
+    ["7", "8", "9"],
+    ["*", "0", "#"],
   ];
 
   const handleDigitClick = (digit: string) => {
@@ -35,23 +35,25 @@ const DialPad: React.FC<DialPadProps> = ({
       {/* Phone Number Display */}
       <div className="mb-6 p-4 bg-gray-100 rounded-lg text-center">
         <div className="text-2xl font-mono text-gray-800 min-h-[2rem]">
-          {phoneNumber || 'Enter number'}
+          {phoneNumber || "Enter number"}
         </div>
       </div>
 
-      {/* Dial Pad Grid */}
-      <div className="grid grid-cols-3 gap-4 mb-6">
-        {digits.flat().map((digit) => (
-          <button
-            key={digit}
-            onClick={() => handleDigitClick(digit)}
-            className="aspect-square bg-white border-2 border-gray-300 rounded-full text-2xl font-semibold text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors shadow-sm"
-            disabled={isConnecting}
-          >
-            {digit}
-          </button>
-        ))}
-      </div>
+      {/* Dial Pad Grid - Hidden when calling */}
+      {!isConnecting && (
+        <div className="grid grid-cols-3 gap-4 mb-6">
+          {digits.flat().map((digit) => (
+            <button
+              key={digit}
+              onClick={() => handleDigitClick(digit)}
+              className="aspect-square bg-white border-2 border-gray-300 rounded-full text-2xl font-semibold text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors shadow-sm"
+              disabled={isConnecting}
+            >
+              {digit}
+            </button>
+          ))}
+        </div>
+      )}
 
       {/* Call Control Buttons */}
       <div className="flex gap-4 justify-center">
@@ -62,7 +64,7 @@ const DialPad: React.FC<DialPadProps> = ({
               disabled={!phoneNumber || isConnecting}
               className="flex-1 max-w-[120px] bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-full transition-colors shadow-lg"
             >
-              {isConnecting ? 'Calling...' : 'Call'}
+              Call
             </button>
             {phoneNumber && (
               <button
