@@ -1,6 +1,5 @@
-import { useCallback, useRef, useState } from "react";
+import { useCallback, useRef } from "react";
 
-// DTMF frequency pairs (in Hz)
 const DTMF_FREQUENCIES: { [key: string]: [number, number] } = {
   "1": [697, 1209],
   "2": [697, 1336],
@@ -19,70 +18,51 @@ const DTMF_FREQUENCIES: { [key: string]: [number, number] } = {
 export const useDTMFTones = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const isPlayingRef = useRef(false);
-  const [volume, setVolume] = useState(0.3); // Default volume 30%
-  const [enabled, setEnabled] = useState(true); // Default enabled
 
-  const playTone = useCallback(
-    (digit: string) => {
-      if (!DTMF_FREQUENCIES[digit] || isPlayingRef.current || !enabled) return;
+  const playTone = useCallback((digit: string) => {
+    if (!DTMF_FREQUENCIES[digit] || isPlayingRef.current) return;
 
-      try {
-        // Create audio context if it doesn't exist
-        if (!audioContextRef.current) {
-          audioContextRef.current = new (window.AudioContext ||
-            window.webkitAudioContext)();
-        }
-
-        const frequencies = DTMF_FREQUENCIES[digit];
-        const duration = 0.1; // 100ms tone duration
-        const now = audioContextRef.current.currentTime;
-
-        // Create two oscillators for the dual-tone
-        const oscillator1 = audioContextRef.current.createOscillator();
-        const oscillator2 = audioContextRef.current.createOscillator();
-        const gainNode = audioContextRef.current.createGain();
-
-        // Set up oscillators
-        oscillator1.frequency.setValueAtTime(frequencies[0], now);
-        oscillator2.frequency.setValueAtTime(frequencies[1], now);
-        oscillator1.type = "sine";
-        oscillator2.type = "sine";
-
-        // Set up gain envelope for smooth start/stop with volume control
-        gainNode.gain.setValueAtTime(0, now);
-        gainNode.gain.linearRampToValueAtTime(volume, now + 0.01);
-        gainNode.gain.linearRampToValueAtTime(volume, now + duration - 0.01);
-        gainNode.gain.linearRampToValueAtTime(0, now + duration);
-
-        // Connect nodes
-        oscillator1.connect(gainNode);
-        oscillator2.connect(gainNode);
-        gainNode.connect(audioContextRef.current.destination);
-
-        // Start and stop oscillators
-        oscillator1.start(now);
-        oscillator2.start(now);
-        oscillator1.stop(now + duration);
-        oscillator2.stop(now + duration);
-
-        // Set playing flag
-        isPlayingRef.current = true;
-        setTimeout(() => {
-          isPlayingRef.current = false;
-        }, duration * 1000);
-      } catch (error) {
-        console.error("Failed to play DTMF tone:", error);
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext ||
+          (window as any).webkitAudioContext)();
       }
-    },
-    [volume, enabled]
-  );
 
-  const updateVolume = useCallback((newVolume: number) => {
-    setVolume(Math.max(0, Math.min(1, newVolume))); // Clamp between 0 and 1
-  }, []);
+      const frequencies = DTMF_FREQUENCIES[digit];
+      const duration = 0.1; // 100ms tone duration
+      const volume = 0.3; // Fixed volume at 30%
+      const now = audioContextRef.current.currentTime;
 
-  const toggleEnabled = useCallback(() => {
-    setEnabled((prev) => !prev);
+      const oscillator1 = audioContextRef.current.createOscillator();
+      const oscillator2 = audioContextRef.current.createOscillator();
+      const gainNode = audioContextRef.current.createGain();
+
+      oscillator1.frequency.setValueAtTime(frequencies[0], now);
+      oscillator2.frequency.setValueAtTime(frequencies[1], now);
+      oscillator1.type = "sine";
+      oscillator2.type = "sine";
+
+      gainNode.gain.setValueAtTime(0, now);
+      gainNode.gain.linearRampToValueAtTime(volume, now + 0.01);
+      gainNode.gain.linearRampToValueAtTime(volume, now + duration - 0.01);
+      gainNode.gain.linearRampToValueAtTime(0, now + duration);
+
+      oscillator1.connect(gainNode);
+      oscillator2.connect(gainNode);
+      gainNode.connect(audioContextRef.current.destination);
+
+      oscillator1.start(now);
+      oscillator2.start(now);
+      oscillator1.stop(now + duration);
+      oscillator2.stop(now + duration);
+
+      isPlayingRef.current = true;
+      setTimeout(() => {
+        isPlayingRef.current = false;
+      }, duration * 1000);
+    } catch (error) {
+      console.error("Failed to play DTMF tone:", error);
+    }
   }, []);
 
   const cleanup = useCallback(() => {
@@ -92,12 +72,5 @@ export const useDTMFTones = () => {
     }
   }, []);
 
-  return {
-    playTone,
-    cleanup,
-    volume,
-    updateVolume,
-    enabled,
-    toggleEnabled,
-  };
+  return { playTone, cleanup };
 };

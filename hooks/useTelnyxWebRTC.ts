@@ -738,20 +738,6 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     stopCallStreaming();
   }, [currentCall, cleanupAudio, stopCallStreaming]);
 
-  // Send DTMF tones during call
-  const sendDTMF = useCallback(
-    (digit: string) => {
-      if (currentCall && isCallActive) {
-        try {
-          currentCall.dtmf(digit);
-        } catch (err) {
-          console.error("Failed to send DTMF:", err);
-        }
-      }
-    },
-    [currentCall, isCallActive]
-  );
-
   // Debug function to check audio setup
   const debugAudioSetup = useCallback(() => {
     console.log("=== AUDIO SETUP DEBUG ===");
@@ -789,6 +775,20 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     }
     console.log("=== END AUDIO DEBUG ===");
   }, [currentCall]);
+
+  // Send DTMF tones during call
+  const sendDTMF = useCallback(
+    (digit: string) => {
+      if (currentCall && typeof currentCall.dtmf === "function") {
+        try {
+          currentCall.dtmf(digit);
+        } catch (err) {
+          console.error("Failed to send DTMF:", err);
+        }
+      }
+    },
+    [currentCall]
+  );
 
   return {
     isConnected,
