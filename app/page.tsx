@@ -30,6 +30,7 @@ export default function Home() {
     isConnecting,
     error,
     hasMicrophoneAccess,
+    callControlId,
     makeCall,
     hangupCall,
     sendDTMF,
@@ -132,6 +133,19 @@ export default function Home() {
                 : "Microphone Access Required"}
             </div>
           </div>
+
+          {/* Call Control Status */}
+          {callControlId && (
+            <div className="mt-2">
+              <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
+                <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
+                Call Streaming Active
+              </div>
+              <div className="text-xs text-blue-600 mt-1">
+                ID: {callControlId.slice(0, 8)}...
+              </div>
+            </div>
+          )}
         </div>
 
         {/* Calling Screen */}
@@ -203,6 +217,19 @@ export default function Home() {
               : "Microphone Access Required"}
           </div>
         </div>
+
+        {/* Call Control Status */}
+        {callControlId && (
+          <div className="mt-2">
+            <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
+              <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
+              Call Streaming Active
+            </div>
+            <div className="text-xs text-blue-600 mt-1">
+              ID: {callControlId.slice(0, 8)}...
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Error Display */}

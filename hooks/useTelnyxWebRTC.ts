@@ -16,11 +16,13 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
   const [currentCall, setCurrentCall] = useState<any>(null);
   const [error, setError] = useState<string | null>(null);
   const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState(false);
+  const [callControlId, setCallControlId] = useState<string | null>(null);
 
   // Refs for audio elements
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
+  const websocketRef = useRef<WebSocket | null>(null);
 
   // Initialize Telnyx client
   useEffect(() => {
@@ -39,7 +41,13 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
         // Request microphone access first
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
-            audio: true,
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              sampleRate: 48000,
+              channelCount: 1,
+            },
             video: false,
           });
           localStreamRef.current = stream;
@@ -82,6 +90,11 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
           setIsConnecting(true);
           setIsCallActive(false);
           setCurrentCall(call);
+
+          // Extract call control ID for streaming
+          if (call.call_control_id) {
+            setCallControlId(call.call_control_id);
+          }
         });
 
         telnyxClient.on("call.answered", (call: any) => {
@@ -91,8 +104,15 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
           setCurrentCall(call);
           setError(null);
 
-          // Handle audio streams when call is answered
-          handleCallAnswered(call);
+          // Extract call control ID if not already set
+          if (call.call_control_id && !callControlId) {
+            setCallControlId(call.call_control_id);
+          }
+
+          // Start call streaming to receive audio
+          if (call.call_control_id) {
+            startCallStreaming(call.call_control_id);
+          }
         });
 
         telnyxClient.on("call.ended", (call: any) => {
@@ -100,7 +120,9 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
           setIsCallActive(false);
           setIsConnecting(false);
           setCurrentCall(null);
+          setCallControlId(null);
           cleanupAudio();
+          stopCallStreaming();
         });
 
         telnyxClient.on("call.updated", (call: any) => {
@@ -121,29 +143,41 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
                 setIsConnecting(true);
                 setIsCallActive(false);
                 setCurrentCall(call);
+                if (call.call_control_id) {
+                  setCallControlId(call.call_control_id);
+                }
                 break;
               case "active":
                 setIsCallActive(true);
                 setIsConnecting(false);
                 setError(null);
-                handleCallAnswered(call);
+                if (call.call_control_id && !callControlId) {
+                  setCallControlId(call.call_control_id);
+                }
+                if (call.call_control_id) {
+                  startCallStreaming(call.call_control_id);
+                }
                 break;
               case "hangup":
               case "destroy":
                 setIsCallActive(false);
                 setIsConnecting(false);
                 setCurrentCall(null);
+                setCallControlId(null);
                 cleanupAudio();
+                stopCallStreaming();
                 break;
               case "purge":
                 console.log("Call purged - call failed");
                 setIsCallActive(false);
                 setIsConnecting(false);
                 setCurrentCall(null);
+                setCallControlId(null);
                 setError(
                   "Call failed - Check SIP credentials and outbound voice profile"
                 );
                 cleanupAudio();
+                stopCallStreaming();
                 break;
               default:
                 console.log("Unknown call state:", call.state);
@@ -154,8 +188,10 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
                   setIsCallActive(false);
                   setIsConnecting(false);
                   setCurrentCall(null);
+                  setCallControlId(null);
                   setError(`Call failed: ${call.state}`);
                   cleanupAudio();
+                  stopCallStreaming();
                 }
                 break;
             }
@@ -176,6 +212,7 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
 
     return () => {
       cleanupAudio();
+      stopCallStreaming();
       if (client) {
         client.disconnect();
       }
@@ -186,6 +223,104 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     config.sipPassword,
     config.phoneNumber,
   ]);
+
+  // Start call streaming using Telnyx Call Control API
+  const startCallStreaming = useCallback(async (callControlId: string) => {
+    try {
+      console.log("Starting call streaming for:", callControlId);
+
+      // Create WebSocket connection for streaming audio
+      const wsUrl = `wss://api.telnyx.com/v2/calls/${callControlId}/streaming`;
+      websocketRef.current = new WebSocket(wsUrl);
+
+      websocketRef.current.onopen = () => {
+        console.log("WebSocket connection opened for streaming");
+
+        // Send streaming start command
+        const streamingCommand = {
+          command: "streaming_start",
+          stream_url: wsUrl,
+          stream_track: "both_tracks",
+          stream_codec: "default",
+          stream_bidirectional_mode: "rtp",
+          stream_bidirectional_codec: "PCMU",
+          stream_bidirectional_target_legs: "both",
+        };
+
+        websocketRef.current?.send(JSON.stringify(streamingCommand));
+      };
+
+      websocketRef.current.onmessage = (event) => {
+        try {
+          const data = JSON.parse(event.data);
+          console.log("Streaming message received:", data);
+
+          // Handle audio stream data
+          if (data.type === "audio" && data.payload) {
+            handleAudioStreamData(data.payload);
+          }
+        } catch (err) {
+          console.error("Failed to parse streaming message:", err);
+        }
+      };
+
+      websocketRef.current.onerror = (error) => {
+        console.error("WebSocket streaming error:", error);
+        setError("Failed to establish audio streaming");
+      };
+
+      websocketRef.current.onclose = () => {
+        console.log("WebSocket streaming connection closed");
+      };
+    } catch (err) {
+      console.error("Failed to start call streaming:", err);
+      setError("Failed to start audio streaming");
+    }
+  }, []);
+
+  // Stop call streaming
+  const stopCallStreaming = useCallback(() => {
+    if (websocketRef.current) {
+      websocketRef.current.close();
+      websocketRef.current = null;
+    }
+  }, []);
+
+  // Handle incoming audio stream data
+  const handleAudioStreamData = useCallback((audioData: any) => {
+    try {
+      // Convert base64 audio data to audio buffer
+      if (audioData.encoding === "base64" && audioData.payload) {
+        // Create audio context and decode the audio data
+        const audioContext = new (window.AudioContext ||
+          window.webkitAudioContext)();
+
+        // Convert base64 to array buffer
+        const binaryString = atob(audioData.payload);
+        const bytes = new Uint8Array(binaryString.length);
+        for (let i = 0; i < binaryString.length; i++) {
+          bytes[i] = binaryString.charCodeAt(i);
+        }
+
+        // Decode audio data
+        audioContext.decodeAudioData(
+          bytes.buffer,
+          (buffer) => {
+            // Create audio source and connect to destination
+            const source = audioContext.createBufferSource();
+            source.buffer = buffer;
+            source.connect(audioContext.destination);
+            source.start(0);
+          },
+          (error) => {
+            console.error("Failed to decode audio data:", error);
+          }
+        );
+      }
+    } catch (err) {
+      console.error("Failed to handle audio stream data:", err);
+    }
+  }, []);
 
   // Handle call answered and set up audio streams
   const handleCallAnswered = useCallback((call: any) => {
@@ -296,6 +431,11 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
           setIsConnecting(true);
           setIsCallActive(false);
           setCurrentCall(call);
+
+          // Extract call control ID
+          if (call.call_control_id) {
+            setCallControlId(call.call_control_id);
+          }
         });
 
         call.on("answered", () => {
@@ -304,7 +444,16 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
           setIsCallActive(true);
           setCurrentCall(call);
           setError(null);
-          handleCallAnswered(call);
+
+          // Extract call control ID if not already set
+          if (call.call_control_id && !callControlId) {
+            setCallControlId(call.call_control_id);
+          }
+
+          // Start call streaming to receive audio
+          if (call.call_control_id) {
+            startCallStreaming(call.call_control_id);
+          }
         });
 
         call.on("ended", () => {
@@ -312,7 +461,9 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
           setIsCallActive(false);
           setIsConnecting(false);
           setCurrentCall(null);
+          setCallControlId(null);
           cleanupAudio();
+          stopCallStreaming();
         });
 
         call.on("remoteStream", (stream: MediaStream) => {
@@ -347,6 +498,9 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
       hasMicrophoneAccess,
       handleCallAnswered,
       cleanupAudio,
+      callControlId,
+      startCallStreaming,
+      stopCallStreaming,
     ]
   );
 
@@ -360,7 +514,8 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
       }
     }
     cleanupAudio();
-  }, [currentCall, cleanupAudio]);
+    stopCallStreaming();
+  }, [currentCall, cleanupAudio, stopCallStreaming]);
 
   // Send DTMF tones during call
   const sendDTMF = useCallback(
@@ -382,6 +537,7 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     isConnecting,
     error,
     hasMicrophoneAccess,
+    callControlId,
     makeCall,
     hangupCall,
     sendDTMF,
