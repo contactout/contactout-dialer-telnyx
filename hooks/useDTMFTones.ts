@@ -23,15 +23,46 @@ export const useDTMFTones = () => {
 
   const playTone = useCallback(
     (digit: string) => {
-      if (!DTMF_FREQUENCIES[digit] || isPlayingRef.current || !enabled) return;
+      console.log("Attempting to play DTMF tone for digit:", digit);
+
+      if (!DTMF_FREQUENCIES[digit]) {
+        console.warn("Invalid digit for DTMF tone:", digit);
+        return;
+      }
+
+      if (isPlayingRef.current) {
+        console.log("DTMF tone already playing, skipping");
+        return;
+      }
+
+      if (!enabled) {
+        console.log("DTMF tones disabled, skipping");
+        return;
+      }
 
       try {
         if (!audioContextRef.current) {
+          console.log("Creating new AudioContext");
           audioContextRef.current = new (window.AudioContext ||
             (window as any).webkitAudioContext)();
         }
 
+        // Resume audio context if it's suspended (browser requirement)
+        if (audioContextRef.current.state === "suspended") {
+          console.log("AudioContext suspended, attempting to resume");
+          audioContextRef.current
+            .resume()
+            .then(() => {
+              console.log("AudioContext resumed successfully");
+            })
+            .catch((err) => {
+              console.error("Failed to resume AudioContext:", err);
+            });
+        }
+
         const frequencies = DTMF_FREQUENCIES[digit];
+        console.log("Playing DTMF tone with frequencies:", frequencies);
+
         const duration = 0.1; // 100ms tone duration
         const now = audioContextRef.current.currentTime;
 
@@ -59,11 +90,15 @@ export const useDTMFTones = () => {
         oscillator2.stop(now + duration);
 
         isPlayingRef.current = true;
+        console.log("DTMF tone started");
+
         setTimeout(() => {
           isPlayingRef.current = false;
+          console.log("DTMF tone finished");
         }, duration * 1000);
       } catch (error) {
         console.error("Failed to play DTMF tone:", error);
+        isPlayingRef.current = false;
       }
     },
     [volume, enabled]

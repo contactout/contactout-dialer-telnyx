@@ -8,7 +8,30 @@ interface TelnyxConfig {
   phoneNumber: string;
 }
 
-export const useTelnyxWebRTC = (config: TelnyxConfig) => {
+interface UseTelnyxWebRTCReturn {
+  isConnected: boolean;
+  isCallActive: boolean;
+  isConnecting: boolean;
+  error: string | null;
+  hasMicrophoneAccess: boolean;
+  callControlId: string | null;
+  makeCall: (phoneNumber: string) => Promise<void>;
+  hangupCall: () => void;
+  sendDTMF: (digit: string) => void;
+  debugAudioSetup: () => void;
+  onCallStatusChange?: (
+    status: "completed" | "failed" | "missed" | "incoming",
+    phoneNumber?: string
+  ) => void;
+}
+
+export const useTelnyxWebRTC = (
+  config: TelnyxConfig,
+  onCallStatusChange?: (
+    status: "completed" | "failed" | "missed" | "incoming",
+    phoneNumber?: string
+  ) => void
+) => {
   const [client, setClient] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
   const [isCallActive, setIsCallActive] = useState(false);
@@ -132,6 +155,13 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
                 setIsCallActive(true);
                 setCurrentCall(call);
                 setError(null);
+                // Notify parent of successful call
+                if (onCallStatusChange) {
+                  onCallStatusChange(
+                    "completed",
+                    call.phoneNumber || config.phoneNumber
+                  );
+                }
                 break;
               case "ended":
                 setIsCallActive(false);
@@ -143,6 +173,13 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
                 );
                 cleanupAudio();
                 stopCallStreaming();
+                // Notify parent of call end
+                if (onCallStatusChange) {
+                  onCallStatusChange(
+                    "completed",
+                    call.phoneNumber || config.phoneNumber
+                  );
+                }
                 break;
               default:
                 console.log("Unknown call state:", call.state);
@@ -157,6 +194,13 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
                   setError(`Call failed: ${call.state}`);
                   cleanupAudio();
                   stopCallStreaming();
+                  // Notify parent of failed call
+                  if (onCallStatusChange) {
+                    onCallStatusChange(
+                      "failed",
+                      call.phoneNumber || config.phoneNumber
+                    );
+                  }
                 }
                 break;
             }

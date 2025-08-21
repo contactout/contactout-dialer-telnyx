@@ -38,7 +38,7 @@ const DialPad: React.FC<DialPadProps> = ({
     <div className="w-full max-w-sm mx-auto">
       {/* Phone Number Display */}
       <div className="mb-6 p-4 bg-gray-100 rounded-lg text-center">
-        <div className="text-2xl font-mono text-gray-800 min-h-[2rem]">
+        <div className="text-xl font-mono text-gray-800 min-h-[2rem]">
           {phoneNumber || "Enter number"}
         </div>
       </div>
@@ -50,10 +50,11 @@ const DialPad: React.FC<DialPadProps> = ({
             <button
               key={digit}
               onClick={() => handleDigitClick(digit)}
-              className="aspect-square bg-white border-2 border-gray-300 rounded-full text-2xl font-semibold text-gray-700 hover:bg-gray-50 active:bg-gray-100 transition-colors shadow-sm"
-              disabled={isConnecting}
+              className="aspect-square bg-white border-2 border-gray-300 rounded-full hover:bg-gray-50 active:bg-gray-100 transition-colors shadow-sm flex items-center justify-center"
             >
-              {digit}
+              <span className="text-xl font-semibold text-gray-800">
+                {digit}
+              </span>
             </button>
           ))}
         </div>
