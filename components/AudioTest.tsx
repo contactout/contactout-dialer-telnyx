@@ -76,8 +76,8 @@ const AudioTest: React.FC<AudioTestProps> = ({ onClose }) => {
 
         <div className="mb-4">
           <p className="text-sm text-gray-600 mb-2">
-            Test your microphone to ensure it's working properly before making
-            calls.
+            Test your microphone to ensure it&apos;s working properly before
+            making calls.
           </p>
 
           {!isRecording ? (
