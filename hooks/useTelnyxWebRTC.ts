@@ -24,7 +24,6 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
   const localStreamRef = useRef<MediaStream | null>(null);
   const websocketRef = useRef<WebSocket | null>(null);
 
-  // Initialize Telnyx client
   useEffect(() => {
     if (
       !config.apiKey ||
@@ -38,7 +37,13 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
 
     const initializeClient = async () => {
       try {
-        // Request microphone access first
+        // Check if TelnyxRTC is available
+        if (typeof TelnyxRTC === "undefined") {
+          setError("Telnyx WebRTC SDK not loaded");
+          return;
+        }
+
+        // Get microphone access first
         try {
           const stream = await navigator.mediaDevices.getUserMedia({
             audio: {
@@ -99,108 +104,42 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
         });
 
         telnyxClient.on("telnyx.error", (error: any) => {
-          console.error("Telnyx error:", error);
-          setError(`Telnyx Error: ${error.message || "Connection error"}`);
+          console.error("Telnyx client error:", error);
+          setError(`Telnyx error: ${error.message || "Unknown error"}`);
           setIsConnected(false);
-          setIsConnecting(false);
         });
 
-        telnyxClient.on("telnyx.socket.close", () => {
-          console.log("Telnyx connection closed");
+        telnyxClient.on("telnyx.close", () => {
+          console.log("Telnyx client closed");
           setIsConnected(false);
+          setError("Connection closed");
         });
 
         // Handle call events
-        telnyxClient.on("call.ringing", (call: any) => {
-          console.log("Call ringing:", call);
-          setIsConnecting(true);
-          setIsCallActive(false);
-          setCurrentCall(call);
-
-          // Extract call control ID for streaming
-          if (call.call_control_id) {
-            setCallControlId(call.call_control_id);
-          }
-        });
-
-        telnyxClient.on("call.answered", (call: any) => {
-          console.log("Call answered:", call);
-          setIsConnecting(false);
-          setIsCallActive(true);
-          setCurrentCall(call);
-          setError(null);
-
-          // Extract call control ID if not already set
-          if (call.call_control_id && !callControlId) {
-            setCallControlId(call.call_control_id);
-          }
-
-          // Start call streaming to receive audio
-          if (call.call_control_id) {
-            startCallStreaming(call.call_control_id);
-          }
-        });
-
-        telnyxClient.on("call.ended", (call: any) => {
-          console.log("Call ended:", call);
-          setIsCallActive(false);
-          setIsConnecting(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          cleanupAudio();
-          stopCallStreaming();
-        });
-
-        telnyxClient.on("call.updated", (call: any) => {
-          console.log("Call updated:", call);
-          setCurrentCall(call);
-        });
-
-        // Handle call notifications for additional states
-        telnyxClient.on("telnyx.notification", (notification: any) => {
-          console.log("Telnyx notification:", notification);
-
-          if (notification.type === "callUpdate") {
-            const call = notification.call;
-            console.log("Call update:", call.state, call);
-
+        telnyxClient.on("call", (call: any) => {
+          console.log("Call event received:", call);
+          if (call.state) {
+            console.log("Call state:", call.state);
             switch (call.state) {
               case "ringing":
                 setIsConnecting(true);
                 setIsCallActive(false);
                 setCurrentCall(call);
-                if (call.call_control_id) {
-                  setCallControlId(call.call_control_id);
-                }
-                break;
-              case "active":
-                setIsCallActive(true);
-                setIsConnecting(false);
                 setError(null);
-                if (call.call_control_id && !callControlId) {
-                  setCallControlId(call.call_control_id);
-                }
-                if (call.call_control_id) {
-                  startCallStreaming(call.call_control_id);
-                }
                 break;
-              case "hangup":
-              case "destroy":
-                setIsCallActive(false);
+              case "answered":
                 setIsConnecting(false);
-                setCurrentCall(null);
-                setCallControlId(null);
-                cleanupAudio();
-                stopCallStreaming();
+                setIsCallActive(true);
+                setCurrentCall(call);
+                setError(null);
                 break;
-              case "purge":
-                console.log("Call purged - call failed");
+              case "ended":
                 setIsCallActive(false);
                 setIsConnecting(false);
                 setCurrentCall(null);
                 setCallControlId(null);
                 setError(
-                  "Call failed - Check SIP credentials and outbound voice profile"
+                  "Call ended - Check SIP credentials and outbound voice profile"
                 );
                 cleanupAudio();
                 stopCallStreaming();
@@ -237,8 +176,11 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     initializeClient();
 
     return () => {
+      // Clean up audio and streaming
       cleanupAudio();
       stopCallStreaming();
+
+      // Disconnect client
       if (client) {
         client.disconnect();
       }
@@ -577,83 +519,145 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
             throw new Error("Failed to create call object");
           }
 
-          if (typeof call.on !== "function") {
-            throw new Error("Call object does not have event handling method");
-          }
-
           console.log("Call object created:", call);
+          console.log("Call object type:", typeof call);
+          console.log("Call object keys:", Object.keys(call));
+          console.log("Call object prototype:", Object.getPrototypeOf(call));
+          console.log("Has 'on' method:", typeof call.on === "function");
+          console.log(
+            "Has 'addEventListener' method:",
+            typeof call.addEventListener === "function"
+          );
+          console.log(
+            "Has 'addListener' method:",
+            typeof call.addListener === "function"
+          );
 
-          // Set up call event handlers with proper error handling
-          try {
-            call.on("ringing", () => {
-              console.log("Call is ringing - setting connecting state");
-              setIsConnecting(true);
-              setIsCallActive(false);
-              setCurrentCall(call);
-              setError(null); // Clear any previous errors
-
-              // Extract call control ID
-              if (call.call_control_id) {
-                setCallControlId(call.call_control_id);
-              }
-            });
-          } catch (err) {
-            console.error("Failed to set up ringing event handler:", err);
+          // Try to find the correct event handling method
+          let eventHandler: any = null;
+          if (typeof call.on === "function") {
+            eventHandler = call.on;
+            console.log("Using call.on method");
+          } else if (typeof call.addEventListener === "function") {
+            eventHandler = call.addEventListener;
+            console.log("Using call.addEventListener method");
+          } else if (typeof call.addListener === "function") {
+            eventHandler = call.addListener;
+            console.log("Using call.addListener method");
+          } else {
+            console.warn("No event handling method found on call object");
+            // Continue without event handlers - the call might still work
           }
 
-          try {
-            call.on("answered", () => {
-              console.log("Call answered - setting active state");
-              setIsConnecting(false);
-              setIsCallActive(true);
-              setCurrentCall(call);
-              setError(null);
+          if (eventHandler) {
+            // Set up call event handlers with proper error handling
+            try {
+              eventHandler("ringing", () => {
+                console.log("Call is ringing - setting connecting state");
+                setIsConnecting(true);
+                setIsCallActive(false);
+                setCurrentCall(call);
+                setError(null); // Clear any previous errors
 
-              // Extract call control ID if not already set
-              if (call.call_control_id && !callControlId) {
-                setCallControlId(call.call_control_id);
+                // Extract call control ID
+                if (call.call_control_id) {
+                  setCallControlId(call.call_control_id);
+                }
+              });
+            } catch (err) {
+              console.error("Failed to set up ringing event handler:", err);
+            }
+
+            try {
+              eventHandler("answered", () => {
+                console.log("Call answered - setting active state");
+                setIsConnecting(false);
+                setIsCallActive(true);
+                setCurrentCall(call);
+                setError(null);
+
+                // Extract call control ID if not already set
+                if (call.call_control_id && !callControlId) {
+                  setCallControlId(call.call_control_id);
+                }
+
+                // Set up audio streams immediately when call is answered
+                setupCallAudioStreams(call);
+
+                // Debug audio setup after a short delay
+                setTimeout(() => {
+                  debugAudioSetup();
+                }, 1000);
+
+                // Start call streaming to receive audio
+                if (call.call_control_id) {
+                  startCallStreaming(call.call_control_id);
+                }
+              });
+            } catch (err) {
+              console.error("Failed to set up answered event handler:", err);
+            }
+
+            try {
+              eventHandler("ended", () => {
+                console.log("Call ended");
+                setIsCallActive(false);
+                setIsConnecting(false);
+                setCurrentCall(null);
+                setCallControlId(null);
+                cleanupAudio();
+                stopCallStreaming();
+              });
+            } catch (err) {
+              console.error("Failed to set up ended event handler:", err);
+            }
+
+            try {
+              eventHandler("remoteStream", (stream: MediaStream) => {
+                console.log("Remote stream received:", stream);
+                if (remoteAudioRef.current) {
+                  remoteAudioRef.current.srcObject = stream;
+                }
+              });
+            } catch (err) {
+              console.error(
+                "Failed to set up remoteStream event handler:",
+                err
+              );
+            }
+          } else {
+            console.warn(
+              "No event handlers set up - call may not provide real-time updates"
+            );
+            // Set a timeout to check call status periodically
+            const checkCallStatus = setInterval(() => {
+              if (call.state) {
+                console.log("Call state:", call.state);
+                if (call.state === "answered" || call.state === "active") {
+                  setIsConnecting(false);
+                  setIsCallActive(true);
+                  setCurrentCall(call);
+                  setError(null);
+                  clearInterval(checkCallStatus);
+
+                  // Set up audio streams
+                  setupCallAudioStreams(call);
+
+                  if (call.call_control_id) {
+                    setCallControlId(call.call_control_id);
+                    startCallStreaming(call.call_control_id);
+                  }
+                } else if (call.state === "ended" || call.state === "failed") {
+                  setIsCallActive(false);
+                  setIsConnecting(false);
+                  setCurrentCall(null);
+                  setCallControlId(null);
+                  cleanupAudio();
+                  stopCallStreaming();
+                  clearInterval(checkCallStatus);
+                }
               }
-
-              // Set up audio streams immediately when call is answered
-              setupCallAudioStreams(call);
-
-              // Debug audio setup after a short delay
-              setTimeout(() => {
-                debugAudioSetup();
-              }, 1000);
-
-              // Start call streaming to receive audio
-              if (call.call_control_id) {
-                startCallStreaming(call.call_control_id);
-              }
-            });
-          } catch (err) {
-            console.error("Failed to set up answered event handler:", err);
-          }
-
-          try {
-            call.on("ended", () => {
-              console.log("Call ended");
-              setIsCallActive(false);
-              setIsConnecting(false);
-              setCurrentCall(null);
-              setCallControlId(null);
-              cleanupAudio();
-              stopCallStreaming();
-            });
-          } catch (err) {
-            console.error("Failed to set up ended event handler:", err);
-          }
-
-          try {
-            call.on("remoteStream", (stream: MediaStream) => {
-              console.log("Remote stream received:", stream);
-              if (remoteAudioRef.current) {
-                remoteAudioRef.current.srcObject = stream;
-              }
-            });
-          } catch (err) {
-            console.error("Failed to set up remoteStream event handler:", err);
+            }, 1000);
           }
 
           setCurrentCall(call);
@@ -789,6 +793,48 @@ export const useTelnyxWebRTC = (config: TelnyxConfig) => {
     },
     [currentCall]
   );
+
+  // Add browser tab close event listener for auto hangup
+  useEffect(() => {
+    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
+      if (isCallActive || isConnecting) {
+        console.log("Browser tab closing - auto hanging up call");
+
+        // Try to hang up the call if possible
+        if (currentCall && typeof currentCall.hangup === "function") {
+          try {
+            currentCall.hangup();
+          } catch (err) {
+            console.error("Failed to hangup call on tab close:", err);
+          }
+        }
+
+        // Clean up audio resources
+        cleanupAudio();
+        stopCallStreaming();
+
+        // Show confirmation dialog (optional)
+        event.preventDefault();
+        event.returnValue =
+          "You have an active call. Are you sure you want to leave?";
+        return event.returnValue;
+      }
+    };
+
+    // Add the event listener
+    window.addEventListener("beforeunload", handleBeforeUnload);
+
+    return () => {
+      // Clean up the event listener
+      window.removeEventListener("beforeunload", handleBeforeUnload);
+    };
+  }, [
+    isCallActive,
+    isConnecting,
+    currentCall,
+    cleanupAudio,
+    stopCallStreaming,
+  ]);
 
   return {
     isConnected,

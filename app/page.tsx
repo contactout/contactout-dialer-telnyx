@@ -6,13 +6,16 @@ import PhoneMockup from "@/components/PhoneMockup";
 import LoginScreen from "@/components/LoginScreen";
 import CallingScreen from "@/components/CallingScreen";
 import AudioTest from "@/components/AudioTest";
+import SettingsDropdown from "@/components/SettingsDropdown";
 import { useDeviceDetection } from "@/hooks/useDeviceDetection";
 import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { useAuth } from "@/contexts/AuthContext";
+import DTMFSettings from "@/components/DTMFSettings";
 
 export default function Home() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [showAudioTest, setShowAudioTest] = useState(false);
+  const [showDTMFSettings, setShowDTMFSettings] = useState(false);
   const { isMobile } = useDeviceDetection();
   const { user, loading, signOut } = useAuth();
 
@@ -90,12 +93,12 @@ export default function Home() {
           <div className="text-sm text-gray-600">
             Welcome, {user.user_metadata?.full_name || user.email}
           </div>
-          <button
-            onClick={signOut}
-            className="text-sm text-gray-500 hover:text-gray-700 underline"
-          >
-            Sign out
-          </button>
+          <SettingsDropdown
+            onTestMicrophone={() => setShowAudioTest(true)}
+            onDebugAudio={debugAudioSetup}
+            onDTMFSettings={() => setShowDTMFSettings(true)}
+            onSignOut={signOut}
+          />
         </div>
 
         {/* Connection Status and Controls - All on one line */}
@@ -188,12 +191,12 @@ export default function Home() {
         <div className="text-sm text-gray-600">
           Welcome, {user.user_metadata?.full_name || user.email}
         </div>
-        <button
-          onClick={signOut}
-          className="text-sm text-gray-500 hover:text-gray-700 underline"
-        >
-          Sign out
-        </button>
+        <SettingsDropdown
+          onTestMicrophone={() => setShowAudioTest(true)}
+          onDebugAudio={debugAudioSetup}
+          onDTMFSettings={() => setShowDTMFSettings(true)}
+          onSignOut={signOut}
+        />
       </div>
 
       {/* Connection Status and Controls - All on one line */}
@@ -229,37 +232,6 @@ export default function Home() {
           ></div>
           {hasMicrophoneAccess ? "Microphone Ready" : "Microphone Required"}
         </div>
-
-        {/* Audio Test Button */}
-        <button
-          onClick={() => setShowAudioTest(true)}
-          className="inline-flex items-center px-3 py-1 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-full transition-colors"
-        >
-          <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fillRule="evenodd"
-              d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z"
-              clipRule="evenodd"
-            />
-          </svg>
-          Test Microphone
-        </button>
-
-        {/* Debug Audio Button */}
-        <button
-          onClick={debugAudioSetup}
-          className="inline-flex items-center px-3 py-1 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-full transition-colors"
-          title="Debug Audio Setup"
-        >
-          <svg className="w-4 h-4 mr-2" fill="currentColor" viewBox="0 0 20 20">
-            <path
-              fillRule="evenodd"
-              d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-              clipRule="evenodd"
-            />
-          </svg>
-          Debug Audio
-        </button>
 
         {/* Call Control Status */}
         {callControlId && (
@@ -312,6 +284,17 @@ export default function Home() {
       )}
       {/* Audio Test Modal */}
       {showAudioTest && <AudioTest onClose={() => setShowAudioTest(false)} />}
+
+      {/* DTMF Settings Modal */}
+      {showDTMFSettings && (
+        <DTMFSettings
+          volume={0.3}
+          onVolumeChange={(volume) => console.log("Volume changed:", volume)}
+          enabled={true}
+          onToggleEnabled={() => console.log("Enabled toggled")}
+          onClose={() => setShowDTMFSettings(false)}
+        />
+      )}
     </main>
   );
 }

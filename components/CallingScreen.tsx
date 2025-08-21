@@ -28,20 +28,10 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
         audioContextRef.current = new (window.AudioContext ||
           window.webkitAudioContext)();
         gainNodeRef.current = audioContextRef.current.createGain();
-        oscillatorRef.current = audioContextRef.current.createOscillator();
-
-        // Connect nodes
-        oscillatorRef.current.connect(gainNodeRef.current);
-        gainNodeRef.current.connect(audioContextRef.current.destination);
 
         // Set up ringtone pattern
         const playRingtone = () => {
-          if (
-            !audioContextRef.current ||
-            !oscillatorRef.current ||
-            !gainNodeRef.current
-          )
-            return;
+          if (!audioContextRef.current || !gainNodeRef.current) return;
 
           const now = audioContextRef.current.currentTime;
 
@@ -84,14 +74,12 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      if (oscillatorRef.current) {
-        oscillatorRef.current.stop();
-        oscillatorRef.current = null;
-      }
       if (audioContextRef.current) {
         audioContextRef.current.close();
         audioContextRef.current = null;
       }
+      // Note: We don't need to stop individual oscillators as they auto-cleanup
+      // and the main oscillatorRef was never started
     };
   }, []);
 

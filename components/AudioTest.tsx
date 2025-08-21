@@ -72,10 +72,10 @@ const AudioTest: React.FC<AudioTestProps> = ({ onClose }) => {
   return (
     <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center z-50">
       <div className="bg-white rounded-lg p-6 max-w-md w-full mx-4">
-        <h3 className="text-lg font-semibold mb-4">Audio Test</h3>
+        <h3 className="text-lg font-semibold text-gray-900 mb-4">Audio Test</h3>
 
         <div className="mb-4">
-          <p className="text-sm text-gray-600 mb-2">
+          <p className="text-sm text-gray-700 mb-2">
             Test your microphone to ensure it&apos;s working properly before
             making calls.
           </p>
@@ -99,14 +99,14 @@ const AudioTest: React.FC<AudioTestProps> = ({ onClose }) => {
 
         {isRecording && (
           <div className="mb-4">
-            <div className="text-sm text-gray-600 mb-2">Audio Level:</div>
+            <div className="text-sm text-gray-700 mb-2">Audio Level:</div>
             <div className="w-full bg-gray-200 rounded-full h-4">
               <div
                 className="bg-green-500 h-4 rounded-full transition-all duration-100"
                 style={{ width: `${(audioLevel / 255) * 100}%` }}
               ></div>
             </div>
-            <div className="text-xs text-gray-500 mt-1">
+            <div className="text-sm text-gray-700 mt-1 font-medium">
               {audioLevel > 0
                 ? "Microphone is working!"
                 : "Speak into your microphone..."}
