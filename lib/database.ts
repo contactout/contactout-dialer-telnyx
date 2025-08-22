@@ -68,7 +68,7 @@ export class DatabaseService {
 
       if (existingStats) {
         // Update existing stats
-        const updates = {
+        const updates: any = {
           total_calls: existingStats.total_calls + 1,
           last_active: now,
         };

@@ -2,18 +2,7 @@
 
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
-import { DatabaseService, UserStats as UserStatsType } from "@/lib/database";
-
-interface UserStats {
-  id: string;
-  email: string;
-  full_name: string;
-  total_calls: number;
-  successful_calls: number;
-  failed_calls: number;
-  last_active: string;
-  created_at: string;
-}
+import { DatabaseService, UserStats } from "@/lib/database";
 
 interface CallStats {
   total_calls: number;
