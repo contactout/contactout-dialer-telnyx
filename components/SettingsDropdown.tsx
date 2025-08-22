@@ -6,6 +6,7 @@ interface SettingsDropdownProps {
   onDTMFSettings: () => void;
   onCallHistory: () => void;
   onSignOut: () => void;
+  isAdmin?: boolean;
 }
 
 const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
@@ -14,6 +15,7 @@ const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
   onDTMFSettings,
   onCallHistory,
   onSignOut,
+  isAdmin = false,
 }) => {
   const [isOpen, setIsOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -154,6 +156,31 @@ const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
                 Call History
               </div>
             </button>
+
+            {isAdmin && (
+              <button
+                onClick={() => {
+                  window.location.href = "/admin";
+                  setIsOpen(false);
+                }}
+                className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors border-t border-gray-100"
+              >
+                <div className="flex items-center">
+                  <svg
+                    className="w-4 h-4 mr-3"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M9 12l2 2 4-4m6 2a9 9 0 11-18 0 9 9 0 0118 0z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                  Admin Dashboard
+                </div>
+              </button>
+            )}
           </div>
         )}
       </div>

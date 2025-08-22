@@ -51,7 +51,7 @@ export default function Home() {
     hangupCall,
     sendDTMF,
     debugAudioSetup,
-  } = useTelnyxWebRTC(telnyxConfig, (status, phoneNumber) => {
+  } = useTelnyxWebRTC(telnyxConfig, user?.id, (status, phoneNumber) => {
     // Update call history with the correct status
     if (phoneNumber) {
       addCall(phoneNumber, status);
@@ -131,6 +131,10 @@ export default function Home() {
             onDTMFSettings={() => setShowDTMFSettings(true)}
             onCallHistory={() => setShowCallHistory(true)}
             onSignOut={signOut}
+            isAdmin={
+              user?.email?.includes("admin") ||
+              user?.user_metadata?.role === "admin"
+            }
           />
         </div>
 
@@ -280,6 +284,10 @@ export default function Home() {
             onDTMFSettings={() => setShowDTMFSettings(true)}
             onCallHistory={() => setShowCallHistory(true)}
             onSignOut={signOut}
+            isAdmin={
+              user?.email?.includes("admin") ||
+              user?.user_metadata?.role === "admin"
+            }
           />
         </div>
       </div>

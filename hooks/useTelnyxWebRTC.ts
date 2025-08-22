@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { TelnyxRTC } from "@telnyx/webrtc";
+import { DatabaseService } from "@/lib/database";
 
 interface TelnyxConfig {
   apiKey: string;
@@ -27,6 +28,7 @@ interface UseTelnyxWebRTCReturn {
 
 export const useTelnyxWebRTC = (
   config: TelnyxConfig,
+  userId?: string,
   onCallStatusChange?: (
     status: "completed" | "failed" | "missed" | "incoming",
     phoneNumber?: string
@@ -155,6 +157,16 @@ export const useTelnyxWebRTC = (
                 setIsCallActive(true);
                 setCurrentCall(call);
                 setError(null);
+                // Track successful call completion if userId is provided
+                if (userId) {
+                  DatabaseService.trackCall({
+                    user_id: userId,
+                    phone_number: call.phoneNumber || config.phoneNumber,
+                    status: "completed",
+                    call_control_id: call.call_control_id,
+                  });
+                }
+
                 // Notify parent of successful call
                 if (onCallStatusChange) {
                   onCallStatusChange(
@@ -195,6 +207,16 @@ export const useTelnyxWebRTC = (
                   setError(`Call failed: ${call.state}`);
                   cleanupAudio();
                   stopCallStreaming();
+                  // Track failed call if userId is provided
+                  if (userId) {
+                    DatabaseService.trackCall({
+                      user_id: userId,
+                      phone_number: call.phoneNumber || config.phoneNumber,
+                      status: "failed",
+                      call_control_id: call.call_control_id,
+                    });
+                  }
+
                   // Notify parent of failed call
                   if (onCallStatusChange) {
                     onCallStatusChange(
@@ -780,6 +802,15 @@ export const useTelnyxWebRTC = (
           destinationNumber: phoneNumber,
           callerNumber: config.phoneNumber,
         });
+
+        // Track call initiation if userId is provided
+        if (userId) {
+          DatabaseService.trackCall({
+            user_id: userId,
+            phone_number: phoneNumber,
+            status: "incoming", // Will be updated when call completes
+          });
+        }
 
         // Immediately set connecting state for better UX
         console.log("Call initiated - setting connecting state immediately");
