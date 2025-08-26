@@ -22,6 +22,91 @@ export interface UserStats {
 }
 
 export class DatabaseService {
+  // Create or update user record
+  static async createOrUpdateUser(userData: {
+    id: string;
+    email: string;
+    full_name?: string | null;
+  }): Promise<void> {
+    try {
+      const now = new Date().toISOString();
+
+      // Try to insert new user, if conflict then update
+      const { error } = await supabase.from("users").upsert(
+        {
+          id: userData.id,
+          email: userData.email,
+          full_name: userData.full_name,
+          total_calls: 0,
+          successful_calls: 0,
+          failed_calls: 0,
+          last_active: now,
+          created_at: now,
+          role: userData.email?.includes("admin") ? "admin" : "user",
+          updated_at: now,
+        },
+        {
+          onConflict: "id",
+        }
+      );
+
+      if (error) throw error;
+    } catch (error) {
+      console.error("Error creating/updating user:", error);
+      throw error;
+    }
+  }
+
+  // Set user as admin
+  static async setUserAsAdmin(userId: string): Promise<void> {
+    try {
+      // Note: This requires the service_role key in production
+      // For now, we'll use a different approach by updating the users table
+      const { error } = await supabase
+        .from("users")
+        .update({
+          role: "admin",
+          updated_at: new Date().toISOString(),
+        })
+        .eq("id", userId);
+
+      if (error) throw error;
+    } catch (error) {
+      console.error("Error setting user as admin:", error);
+      throw error;
+    }
+  }
+
+  // Check if user is admin
+  static async isUserAdmin(userId: string): Promise<boolean> {
+    try {
+      // Check our users table first
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("role")
+        .eq("id", userId)
+        .single();
+
+      if (!userError && userData?.role === "admin") {
+        return true;
+      }
+
+      // Fallback: check if email contains 'admin'
+      const { data: user, error } = await supabase
+        .from("users")
+        .select("email")
+        .eq("id", userId)
+        .single();
+
+      if (error) return false;
+
+      return user?.email?.includes("admin") || false;
+    } catch (error) {
+      console.error("Error checking admin status:", error);
+      return false;
+    }
+  }
+
   // Track a new call
   static async trackCall(
     callData: Omit<CallRecord, "id" | "timestamp">

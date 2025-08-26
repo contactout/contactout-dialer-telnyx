@@ -20,23 +20,30 @@ export default function AdminPage() {
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    if (!loading && !user) {
-      // Redirect to login if not authenticated
-      window.location.href = "/";
-      return;
-    }
-
-    if (user) {
-      // Check if user is admin (you can modify this logic)
-      const isAdmin =
-        user.email?.includes("admin") || user.user_metadata?.role === "admin";
-      if (!isAdmin) {
-        setError("Access denied. Admin privileges required.");
+    const checkAdminAndFetch = async () => {
+      if (!loading && !user) {
+        // Redirect to login if not authenticated
+        window.location.href = "/";
         return;
       }
 
-      fetchAdminData();
-    }
+      if (user) {
+        // Check if user is admin using our database service
+        try {
+          const isAdmin = await DatabaseService.isUserAdmin(user.id);
+          if (!isAdmin) {
+            setError("Access denied. Admin privileges required.");
+            return;
+          }
+          fetchAdminData();
+        } catch (error) {
+          console.error("Error checking admin status:", error);
+          setError("Failed to verify admin privileges");
+        }
+      }
+    };
+
+    checkAdminAndFetch();
   }, [user, loading]);
 
   const fetchAdminData = async () => {
@@ -121,6 +128,12 @@ export default function AdminPage() {
                   />
                 </svg>
                 Refresh
+              </button>
+              <button
+                onClick={() => (window.location.href = "/admin/manage")}
+                className="px-4 py-2 bg-purple-600 text-white rounded-lg hover:bg-purple-700 transition-colors"
+              >
+                Manage Users
               </button>
               <button
                 onClick={() => (window.location.href = "/")}

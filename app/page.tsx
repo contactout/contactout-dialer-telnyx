@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useState, useEffect } from "react";
 import DialPad from "@/components/DialPad";
 import PhoneMockup from "@/components/PhoneMockup";
 import LoginScreen from "@/components/LoginScreen";
@@ -13,12 +13,14 @@ import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { useCallHistory } from "@/hooks/useCallHistory";
 import { useAuth } from "@/contexts/AuthContext";
 import DTMFSettings from "@/components/DTMFSettings";
+import { DatabaseService } from "@/lib/database";
 
 export default function Home() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [showAudioTest, setShowAudioTest] = useState(false);
   const [showDTMFSettings, setShowDTMFSettings] = useState(false);
   const [showCallHistory, setShowCallHistory] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
   const { isMobile } = useDeviceDetection();
   const { user, loading, signOut } = useAuth();
 
@@ -57,6 +59,20 @@ export default function Home() {
       addCall(phoneNumber, status);
     }
   });
+
+  // Check admin status when user changes
+  useEffect(() => {
+    const checkAdminStatus = async () => {
+      if (user) {
+        const adminStatus = await DatabaseService.isUserAdmin(user.id);
+        setIsAdmin(adminStatus);
+      } else {
+        setIsAdmin(false);
+      }
+    };
+
+    checkAdminStatus();
+  }, [user]);
 
   // Show loading spinner while checking auth
   if (loading) {
@@ -131,10 +147,7 @@ export default function Home() {
             onDTMFSettings={() => setShowDTMFSettings(true)}
             onCallHistory={() => setShowCallHistory(true)}
             onSignOut={signOut}
-            isAdmin={
-              user?.email?.includes("admin") ||
-              user?.user_metadata?.role === "admin"
-            }
+            isAdmin={user?.email?.includes("admin") || isAdmin}
           />
         </div>
 
@@ -284,10 +297,7 @@ export default function Home() {
             onDTMFSettings={() => setShowDTMFSettings(true)}
             onCallHistory={() => setShowCallHistory(true)}
             onSignOut={signOut}
-            isAdmin={
-              user?.email?.includes("admin") ||
-              user?.user_metadata?.role === "admin"
-            }
+            isAdmin={user?.email?.includes("admin") || isAdmin}
           />
         </div>
       </div>

@@ -1,8 +1,9 @@
-'use client';
+"use client";
 
-import { createContext, useContext, useEffect, useState } from 'react';
-import { User, Session } from '@supabase/supabase-js';
-import { supabase } from '@/lib/supabase';
+import { createContext, useContext, useEffect, useState } from "react";
+import { User, Session } from "@supabase/supabase-js";
+import { supabase } from "@/lib/supabase";
+import { DatabaseService } from "@/lib/database";
 
 interface AuthContextType {
   user: User | null;
@@ -23,30 +24,42 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   // Domain validation function
   const isContactOutDomain = (email: string): boolean => {
-    return email.endsWith('@contactout.com') || email.endsWith('@contactout.io');
+    return (
+      email.endsWith("@contactout.com") || email.endsWith("@contactout.io")
+    );
   };
 
   useEffect(() => {
     // Check if Supabase credentials are configured
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
-    
-    if (!supabaseUrl || !supabaseKey || supabaseUrl.includes('your_') || supabaseKey.includes('your_')) {
+
+    if (
+      !supabaseUrl ||
+      !supabaseKey ||
+      supabaseUrl.includes("your_") ||
+      supabaseKey.includes("your_")
+    ) {
       // Skip auth if credentials are not configured
-      console.warn('Supabase credentials not configured. Skipping authentication.');
+      console.warn(
+        "Supabase credentials not configured. Skipping authentication."
+      );
       setLoading(false);
       return;
     }
 
     // Get initial session
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    }).catch((error) => {
-      console.error('Supabase auth error:', error);
-      setLoading(false);
-    });
+    supabase.auth
+      .getSession()
+      .then(({ data: { session } }) => {
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      })
+      .catch((error) => {
+        console.error("Supabase auth error:", error);
+        setLoading(false);
+      });
 
     // Listen for auth changes
     const {
@@ -55,7 +68,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       if (session?.user?.email) {
         // Check if the user's email domain is allowed
         if (!isContactOutDomain(session.user.email)) {
-          setAuthError('Access restricted to ContactOut domain emails only.');
+          setAuthError("Access restricted to ContactOut domain emails only.");
           // Sign out the user immediately
           await supabase.auth.signOut();
           setSession(null);
@@ -63,10 +76,23 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           setLoading(false);
           return;
         }
+
+        // Create or update user record in our users table
+        try {
+          await DatabaseService.createOrUpdateUser({
+            id: session.user.id,
+            email: session.user.email,
+            full_name: session.user.user_metadata?.full_name || null,
+          });
+        } catch (error) {
+          console.error("Failed to create/update user record:", error);
+          // Don't block login if user creation fails
+        }
+
         // Clear any previous auth errors for valid users
         setAuthError(null);
       }
-      
+
       setSession(session);
       setUser(session?.user ?? null);
       setLoading(false);
@@ -77,20 +103,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   const signInWithGoogle = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
-      provider: 'google',
+      provider: "google",
       options: {
         redirectTo: `${window.location.origin}`,
       },
     });
     if (error) {
-      console.error('Error signing in with Google:', error.message);
+      console.error("Error signing in with Google:", error.message);
     }
   };
 
   const signOut = async () => {
     const { error } = await supabase.auth.signOut();
     if (error) {
-      console.error('Error signing out:', error.message);
+      console.error("Error signing out:", error.message);
     }
     // Clear auth error on sign out
     setAuthError(null);
@@ -111,7 +137,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 export function useAuth() {
   const context = useContext(AuthContext);
   if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider');
+    throw new Error("useAuth must be used within an AuthProvider");
   }
   return context;
 }
