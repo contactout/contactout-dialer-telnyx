@@ -88,8 +88,27 @@ export class DatabaseService {
 
   // Check if user is admin
   static async isUserAdmin(userId: string): Promise<boolean> {
+    // Clean up old cache entries periodically
+    this.cleanupCache();
+
+    // Add rate limiting to prevent repeated failed queries
+    const cacheKey = `admin_check_${userId}`;
+    const now = Date.now();
+    const lastCheck = this.adminCheckCache.get(cacheKey);
+
+    // If we checked recently and it failed, don't retry immediately
+    if (lastCheck && now - lastCheck.timestamp < 30000) {
+      // 30 second cooldown
+      if (lastCheck.failed) {
+        console.log(
+          "Admin check failed recently, using cached result to prevent repeated queries"
+        );
+        return lastCheck.result;
+      }
+    }
+
     try {
-      // Check our users table first
+      // Check our users table first for role
       const { data: userData, error: userError } = await supabase
         .from("users")
         .select("role")
@@ -97,7 +116,21 @@ export class DatabaseService {
         .single();
 
       if (!userError && userData?.role === "admin") {
+        // Cache successful result
+        this.adminCheckCache.set(cacheKey, {
+          result: true,
+          timestamp: now,
+          failed: false,
+        });
         return true;
+      }
+
+      // If role check failed or user doesn't have admin role, check email as fallback
+      if (userError) {
+        console.warn(
+          "Role check failed, trying email fallback:",
+          userError.message
+        );
       }
 
       // Fallback: check if email contains 'admin'
@@ -112,13 +145,32 @@ export class DatabaseService {
           "Database query failed, falling back to email check:",
           error
         );
+        // Cache failed result to prevent repeated queries
+        this.adminCheckCache.set(cacheKey, {
+          result: false,
+          timestamp: now,
+          failed: true,
+        });
         // If database is unavailable, fall back to email-based admin check
         return false;
       }
 
-      return user?.email?.includes("admin") || false;
+      const result = user?.email?.includes("admin") || false;
+      // Cache successful result
+      this.adminCheckCache.set(cacheKey, {
+        result,
+        timestamp: now,
+        failed: false,
+      });
+      return result;
     } catch (error) {
       console.error("Error checking admin status:", error);
+      // Cache failed result to prevent repeated queries
+      this.adminCheckCache.set(cacheKey, {
+        result: false,
+        timestamp: now,
+        failed: true,
+      });
       // Return false on any error to prevent admin access issues
       return false;
     }
@@ -420,6 +472,32 @@ export class DatabaseService {
       console.log("Required tables: users, calls");
     } catch (error) {
       console.error("Error initializing tables:", error);
+    }
+  }
+
+  // Static cache for admin checks to prevent repeated queries
+  private static adminCheckCache = new Map<
+    string,
+    { result: boolean; timestamp: number; failed: boolean }
+  >();
+
+  // Clean up old cache entries periodically
+  private static cleanupCache(): void {
+    const now = Date.now();
+    const maxAge = 3600000; // 1 hour old
+
+    // Use Array.from to convert iterator to array for compatibility
+    const entries = Array.from(this.adminCheckCache.entries());
+    for (const [key, value] of entries) {
+      if (now - value.timestamp > maxAge) {
+        this.adminCheckCache.delete(key);
+      }
+    }
+
+    // If cache is still too large, clear it completely
+    if (this.adminCheckCache.size > 100) {
+      console.log("Admin check cache too large, clearing completely");
+      this.adminCheckCache.clear();
     }
   }
 }

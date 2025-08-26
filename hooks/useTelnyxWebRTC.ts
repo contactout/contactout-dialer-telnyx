@@ -2,6 +2,18 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { TelnyxRTC } from "@telnyx/webrtc";
 import { DatabaseService } from "@/lib/database";
 
+// State machine for call states
+type CallState =
+  | "idle"
+  | "connecting"
+  | "trying"
+  | "ringing"
+  | "answered"
+  | "active"
+  | "ended"
+  | "failed"
+  | "error";
+
 interface TelnyxConfig {
   apiKey: string;
   sipUsername: string;
@@ -16,6 +28,7 @@ interface UseTelnyxWebRTCReturn {
   error: string | null;
   hasMicrophoneAccess: boolean;
   callControlId: string | null;
+  callState: CallState;
   makeCall: (phoneNumber: string) => Promise<void>;
   hangupCall: () => void;
   sendDTMF: (digit: string) => void;
@@ -50,6 +63,14 @@ export const useTelnyxWebRTC = (
     "excellent" | "good" | "fair" | "poor"
   >("good");
   const [isReconnecting, setIsReconnecting] = useState(false);
+
+  // Call state management
+  const [callState, setCallState] = useState<CallState>("idle");
+
+  // Timeout refs to prevent race conditions
+  const callTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const tryingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const statusCheckRef = useRef<NodeJS.Timeout | null>(null);
 
   // Refs for audio elements
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -159,16 +180,10 @@ export const useTelnyxWebRTC = (
             console.log("Call state:", call.state);
             switch (call.state) {
               case "ringing":
-                setIsConnecting(true);
-                setIsCallActive(false);
-                setCurrentCall(call);
-                setError(null);
+                transitionCallState("ringing", call);
                 break;
               case "answered":
-                setIsConnecting(false);
-                setIsCallActive(true);
-                setCurrentCall(call);
-                setError(null);
+                transitionCallState("answered", call);
                 // Track successful call completion if userId is provided
                 if (userId) {
                   DatabaseService.trackCall({
@@ -192,13 +207,7 @@ export const useTelnyxWebRTC = (
               case "hangup":
               case "destroy":
                 console.log("Call ended:", call.state);
-                setIsCallActive(false);
-                setIsConnecting(false);
-                setCurrentCall(null);
-                setCallControlId(null);
-                setError(null); // Clear any previous errors
-                cleanupAudio();
-                stopCallStreaming();
+                transitionCallState("ended", call);
                 // Notify parent of call end
                 if (onCallStatusChange) {
                   onCallStatusChange(
@@ -214,13 +223,8 @@ export const useTelnyxWebRTC = (
                   call.state.includes("fail") ||
                   call.state.includes("error")
                 ) {
-                  setIsCallActive(false);
-                  setIsConnecting(false);
-                  setCurrentCall(null);
-                  setCallControlId(null);
+                  transitionCallState("failed", call);
                   setError(`Call failed: ${call.state}`);
-                  cleanupAudio();
-                  stopCallStreaming();
                   // Track failed call if userId is provided
                   if (userId) {
                     DatabaseService.trackCall({
@@ -251,14 +255,7 @@ export const useTelnyxWebRTC = (
           const duration = callStartTime
             ? Math.floor((Date.now() - callStartTime) / 1000)
             : undefined;
-          setIsCallActive(false);
-          setIsConnecting(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          setCallStartTime(null);
-          setError(null);
-          cleanupAudio();
-          stopCallStreaming();
+          transitionCallState("ended", call);
           if (onCallStatusChange) {
             onCallStatusChange(
               "completed",
@@ -271,14 +268,8 @@ export const useTelnyxWebRTC = (
         // Handle call failures (including invalid phone numbers)
         telnyxClient.on("call.failed", (call: any) => {
           console.log("Call failed event received:", call);
-          setIsCallActive(false);
-          setIsConnecting(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          setCallStartTime(null);
+          transitionCallState("failed", call);
           setError("Call failed - Invalid phone number or connection error");
-          cleanupAudio();
-          stopCallStreaming();
 
           // Track failed call if userId is provided
           if (userId) {
@@ -303,14 +294,8 @@ export const useTelnyxWebRTC = (
         // Handle call rejections
         telnyxClient.on("call.rejected", (call: any) => {
           console.log("Call rejected event received:", call);
-          setIsCallActive(false);
-          setIsConnecting(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          setCallStartTime(null);
+          transitionCallState("failed", call);
           setError("Call rejected - Number may be invalid or unavailable");
-          cleanupAudio();
-          stopCallStreaming();
 
           // Track rejected call if userId is provided
           if (userId) {
@@ -335,14 +320,8 @@ export const useTelnyxWebRTC = (
         // Handle call errors
         telnyxClient.on("call.error", (call: any, error: any) => {
           console.log("Call error event received:", call, error);
-          setIsCallActive(false);
-          setIsConnecting(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          setCallStartTime(null);
+          transitionCallState("error", call);
           setError(`Call error: ${error?.message || "Unknown error occurred"}`);
-          cleanupAudio();
-          stopCallStreaming();
 
           // Track failed call if userId is provided
           if (userId) {
@@ -369,14 +348,25 @@ export const useTelnyxWebRTC = (
           const duration = callStartTime
             ? Math.floor((Date.now() - callStartTime) / 1000)
             : undefined;
-          setIsCallActive(false);
-          setIsConnecting(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          setCallStartTime(null);
-          setError(null);
-          cleanupAudio();
-          stopCallStreaming();
+
+          // Check if call was destroyed due to an error or normal completion
+          if (call.state === "hangup" && callState === "connecting") {
+            // Call was hung up while connecting - likely invalid number or network issue
+            setError(
+              "Call failed - Phone number may be invalid or unavailable"
+            );
+            transitionCallState("failed", call);
+          } else if (call.state === "destroy" && callState === "connecting") {
+            // Call was destroyed while connecting - likely a connection issue
+            setError(
+              "Call connection failed - Please check your network connection"
+            );
+            transitionCallState("failed", call);
+          } else {
+            // Normal call completion
+            transitionCallState("ended", call);
+          }
+
           if (onCallStatusChange) {
             onCallStatusChange(
               "completed",
@@ -757,6 +747,105 @@ export const useTelnyxWebRTC = (
       localStreamRef.current = null;
     }
   }, []);
+
+  // Clean up all timeouts and intervals
+  const cleanupTimeouts = useCallback(() => {
+    if (callTimeoutRef.current) {
+      clearTimeout(callTimeoutRef.current);
+      callTimeoutRef.current = null;
+    }
+    if (tryingTimeoutRef.current) {
+      clearTimeout(tryingTimeoutRef.current);
+      tryingTimeoutRef.current = null;
+    }
+    if (statusCheckRef.current) {
+      clearInterval(statusCheckRef.current);
+      statusCheckRef.current = null;
+    }
+  }, []);
+
+  // State transition function to ensure valid state changes
+  const transitionCallState = useCallback(
+    (newState: CallState, call?: any) => {
+      console.log(`Call state transition: ${callState} -> ${newState}`);
+
+      // Validate state transitions
+      const validTransitions: Record<CallState, CallState[]> = {
+        idle: ["connecting", "trying"],
+        connecting: ["trying", "ringing", "failed", "error", "idle"],
+        trying: ["ringing", "answered", "failed", "error", "idle"],
+        ringing: ["answered", "failed", "error", "idle"],
+        answered: ["active", "ended", "failed", "error"],
+        active: ["ended", "failed", "error"],
+        ended: ["idle"],
+        failed: ["idle"],
+        error: ["idle"],
+      };
+
+      if (!validTransitions[callState].includes(newState)) {
+        console.warn(`Invalid state transition: ${callState} -> ${newState}`);
+        return;
+      }
+
+      setCallState(newState);
+
+      // Update related states based on call state
+      switch (newState) {
+        case "idle":
+          setIsConnecting(false);
+          setIsCallActive(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          setCallStartTime(null);
+          setError(null);
+          cleanupAudio();
+          stopCallStreaming();
+          break;
+        case "connecting":
+        case "trying":
+          setIsConnecting(true);
+          setIsCallActive(false);
+          setCurrentCall(call);
+          setError(null);
+          break;
+        case "ringing":
+          setIsConnecting(true);
+          setIsCallActive(false);
+          setCurrentCall(call);
+          setError(null);
+          break;
+        case "answered":
+        case "active":
+          setIsConnecting(false);
+          setIsCallActive(true);
+          setCurrentCall(call);
+          setError(null);
+          if (!callStartTime) {
+            setCallStartTime(Date.now());
+          }
+          break;
+        case "ended":
+          setIsConnecting(false);
+          setIsCallActive(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          setError(null);
+          cleanupAudio();
+          stopCallStreaming();
+          break;
+        case "failed":
+        case "error":
+          setIsConnecting(false);
+          setIsCallActive(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          cleanupAudio();
+          stopCallStreaming();
+          break;
+      }
+    },
+    [callState, callStartTime, cleanupAudio, stopCallStreaming]
+  );
 
   // Network reconnection logic with exponential backoff
   const attemptReconnection = useCallback(async () => {
@@ -1171,19 +1260,64 @@ export const useTelnyxWebRTC = (
           }
 
           setCurrentCall(call);
+          transitionCallState("connecting", call);
 
-          // Set a timeout to catch silent failures (including invalid numbers)
-          setTimeout(() => {
-            if (isConnecting && !isCallActive) {
-              console.log("Call timeout - no response after 5 seconds");
-              setIsConnecting(false);
-              setCurrentCall(null);
-              setCallControlId(null);
+          // Consolidated timeout handler to prevent race conditions
+          const clearAllTimeouts = () => {
+            if (callTimeoutRef.current) {
+              clearTimeout(callTimeoutRef.current);
+              callTimeoutRef.current = null;
+            }
+            if (tryingTimeoutRef.current) {
+              clearTimeout(tryingTimeoutRef.current);
+              tryingTimeoutRef.current = null;
+            }
+            if (statusCheckRef.current) {
+              clearInterval(statusCheckRef.current);
+              statusCheckRef.current = null;
+            }
+          };
+
+          // Set up periodic status check for calls without event handlers
+          if (!call.on || typeof call.on !== "function") {
+            statusCheckRef.current = setInterval(() => {
+              if (call.state) {
+                console.log("Call state check:", call.state);
+                switch (call.state) {
+                  case "trying":
+                    transitionCallState("trying", call);
+                    break;
+                  case "ringing":
+                    transitionCallState("ringing", call);
+                    break;
+                  case "answered":
+                  case "active":
+                    transitionCallState("active", call);
+                    setupCallAudioStreams(call);
+                    if (call.call_control_id) {
+                      setCallControlId(call.call_control_id);
+                      startCallStreaming(call.call_control_id);
+                    }
+                    clearAllTimeouts();
+                    break;
+                  case "ended":
+                  case "failed":
+                    transitionCallState("ended", call);
+                    clearAllTimeouts();
+                    break;
+                }
+              }
+            }, 1000);
+          }
+
+          // Set timeout for calls stuck in trying state (3 seconds)
+          tryingTimeoutRef.current = setTimeout(() => {
+            if (callState === "trying" || callState === "connecting") {
+              console.log("Call stuck in trying state - likely invalid number");
+              transitionCallState("failed", call);
               setError(
-                "Call timeout - Phone number may be invalid or unavailable"
+                "Call failed - Phone number may be invalid or unavailable"
               );
-              cleanupAudio();
-              stopCallStreaming();
 
               // Track failed call if userId is provided
               if (userId) {
@@ -1198,6 +1332,33 @@ export const useTelnyxWebRTC = (
               if (onCallStatusChange) {
                 onCallStatusChange("failed", phoneNumber, undefined);
               }
+              clearAllTimeouts();
+            }
+          }, 3000);
+
+          // Set timeout for overall call timeout (5 seconds)
+          callTimeoutRef.current = setTimeout(() => {
+            if (callState === "connecting" || callState === "trying") {
+              console.log("Call timeout - no response after 5 seconds");
+              transitionCallState("failed", call);
+              setError(
+                "Call timeout - Phone number may be invalid or unavailable"
+              );
+
+              // Track failed call if userId is provided
+              if (userId) {
+                DatabaseService.trackCall({
+                  user_id: userId,
+                  phone_number: phoneNumber,
+                  status: "failed",
+                });
+              }
+
+              // Notify parent of failed call
+              if (onCallStatusChange) {
+                onCallStatusChange("failed", phoneNumber, undefined);
+              }
+              clearAllTimeouts();
             }
           }, 5000);
         };
@@ -1287,14 +1448,7 @@ export const useTelnyxWebRTC = (
 
     // Always clean up our local state and resources
     console.log("Cleaning up call resources");
-    setIsCallActive(false);
-    setIsConnecting(false);
-    setCurrentCall(null);
-    setCallControlId(null);
-    setCallStartTime(null);
-    setError(null); // Clear any errors
-    cleanupAudio();
-    stopCallStreaming();
+    transitionCallState("ended", currentCall);
 
     // Notify parent of call end with duration
     if (onCallStatusChange) {
@@ -1309,8 +1463,7 @@ export const useTelnyxWebRTC = (
     callStartTime,
     config.phoneNumber,
     onCallStatusChange,
-    cleanupAudio,
-    stopCallStreaming,
+    transitionCallState,
   ]);
 
   // Debug function to check audio setup
@@ -1459,6 +1612,7 @@ export const useTelnyxWebRTC = (
         // Clean up audio resources
         cleanupAudio();
         stopCallStreaming();
+        cleanupTimeouts();
 
         // Show confirmation dialog (optional)
         event.preventDefault();
@@ -1481,6 +1635,7 @@ export const useTelnyxWebRTC = (
     currentCall,
     cleanupAudio,
     stopCallStreaming,
+    cleanupTimeouts,
   ]);
 
   return {
@@ -1490,6 +1645,7 @@ export const useTelnyxWebRTC = (
     error,
     hasMicrophoneAccess,
     callControlId,
+    callState,
     makeCall,
     hangupCall,
     sendDTMF,

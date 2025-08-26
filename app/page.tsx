@@ -21,6 +21,7 @@ export default function Home() {
   const [showDTMFSettings, setShowDTMFSettings] = useState(false);
   const [showCallHistory, setShowCallHistory] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
+  const [adminStatusChecked, setAdminStatusChecked] = useState(false);
   const { isMobile } = useDeviceDetection();
   const { user, loading, signOut } = useAuth();
 
@@ -49,6 +50,7 @@ export default function Home() {
     error,
     hasMicrophoneAccess,
     callControlId,
+    callState,
     makeCall,
     hangupCall,
     sendDTMF,
@@ -71,27 +73,80 @@ export default function Home() {
 
   // Check admin status when user changes
   useEffect(() => {
+    let isMounted = true;
+    let adminCheckTimeout: NodeJS.Timeout | null = null;
+
     const checkAdminStatus = async () => {
-      if (user) {
-        console.log("Checking admin status for user:", user.email);
-        try {
-          const adminStatus = await DatabaseService.isUserAdmin(user.id);
+      if (!user || !isMounted || adminStatusChecked) return;
+
+      // Prevent multiple simultaneous admin checks
+      if (adminCheckTimeout) {
+        console.log("Admin check already in progress, skipping...");
+        return;
+      }
+
+      console.log("Checking admin status for user:", user.email);
+
+      try {
+        // Set a timeout to prevent rapid repeated calls
+        adminCheckTimeout = setTimeout(() => {
+          adminCheckTimeout = null;
+        }, 5000); // 5 second cooldown
+
+        const adminStatus = await DatabaseService.isUserAdmin(user.id);
+
+        if (isMounted) {
           console.log("Database admin check result:", adminStatus);
           setIsAdmin(adminStatus);
-        } catch (error) {
+          setAdminStatusChecked(true); // Mark as checked to prevent repeated calls
+        }
+      } catch (error) {
+        if (isMounted) {
           console.error("Error checking admin status:", error);
           // Fallback to email-based admin check
           const fallbackAdmin = user.email?.includes("admin") || false;
           console.log("Fallback admin check result:", fallbackAdmin);
           setIsAdmin(fallbackAdmin);
+          setAdminStatusChecked(true); // Mark as checked even on error
+
+          // If it's a network error, set a longer cooldown
+          if (
+            error instanceof Error &&
+            error.message.includes("Failed to fetch")
+          ) {
+            console.log(
+              "Network error detected, setting longer cooldown for admin checks"
+            );
+            // Set a longer cooldown for network errors to prevent infinite loops
+            setTimeout(() => {
+              setAdminStatusChecked(false);
+            }, 60000); // 1 minute cooldown for network errors
+          }
         }
-      } else {
-        setIsAdmin(false);
+      } finally {
+        // Clear the timeout
+        if (adminCheckTimeout) {
+          clearTimeout(adminCheckTimeout);
+          adminCheckTimeout = null;
+        }
       }
     };
 
-    checkAdminStatus();
-  }, [user]);
+    // Only check admin status if we have a user and haven't checked recently
+    if (user && user.id && !adminStatusChecked) {
+      checkAdminStatus();
+    } else if (!user) {
+      setIsAdmin(false);
+      setAdminStatusChecked(false); // Reset when user changes
+    }
+
+    return () => {
+      isMounted = false;
+      if (adminCheckTimeout) {
+        clearTimeout(adminCheckTimeout);
+      }
+    };
+  }, [user?.id, adminStatusChecked]); // Include adminStatusChecked in dependencies
 
   // Auto-return to dial pad when call errors occur
   useEffect(() => {
@@ -119,6 +174,23 @@ export default function Home() {
   useEffect(() => {
     setupFallbackAudio();
   }, [setupFallbackAudio]);
+
+  // Global error boundary for admin status checking
+  useEffect(() => {
+    // If we've had multiple failed admin checks, disable them temporarily
+    if (adminStatusChecked === false && user?.id) {
+      // Add a safety timeout to prevent infinite loops
+      const safetyTimeout = setTimeout(() => {
+        console.log(
+          "Safety timeout triggered, forcing admin status to false to prevent infinite loop"
+        );
+        setIsAdmin(false);
+        setAdminStatusChecked(true);
+      }, 10000); // 10 second safety timeout
+
+      return () => clearTimeout(safetyTimeout);
+    }
+  }, [adminStatusChecked, user?.id]);
 
   // Show loading spinner while checking auth
   if (loading) {
@@ -310,6 +382,9 @@ export default function Home() {
               retryCall(phoneNumber, 3);
             }
           }}
+          isConnecting={isConnecting}
+          isCallActive={isCallActive}
+          callState={callState || ""}
         />
 
         {/* Debug Audio Button */}

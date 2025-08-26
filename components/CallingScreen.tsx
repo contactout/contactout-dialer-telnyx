@@ -13,6 +13,9 @@ interface CallingScreenProps {
   error?: string | null;
   onReturnToDialPad?: () => void;
   onRetry?: () => void;
+  isConnecting?: boolean;
+  isCallActive?: boolean;
+  callState?: string;
 }
 
 const CallingScreen: React.FC<CallingScreenProps> = ({
@@ -21,6 +24,9 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   error,
   onReturnToDialPad,
   onRetry,
+  isConnecting = false,
+  isCallActive = false,
+  callState = "",
 }) => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -183,7 +189,17 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
       </button>
 
       {/* Call Status */}
-      <div className="mt-6 text-sm text-gray-500">Waiting for answer...</div>
+      <div className="mt-6 text-sm text-gray-500">
+        {error
+          ? error
+          : isCallActive
+          ? "Call in progress"
+          : isConnecting
+          ? callState === "trying"
+            ? "Connecting..."
+            : "Waiting for answer..."
+          : "Call ended"}
+      </div>
     </div>
   );
 };
