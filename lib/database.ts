@@ -180,60 +180,93 @@ export class DatabaseService {
   static async trackCall(
     callData: Omit<CallRecord, "id" | "timestamp">
   ): Promise<void> {
-    try {
-      // Calculate call costs based on status and duration
-      let voiceCost = 0;
-      let sipTrunkingCost = 0;
-      let totalCost = 0;
-      let destinationCountry = callData.destination_country;
+    const maxRetries = 3;
+    let retryCount = 0;
 
-      // If destination country not provided, try to extract from phone number
-      if (!destinationCountry) {
-        destinationCountry = TelnyxCostCalculator.getCountryFromPhoneNumber(
-          callData.phone_number
-        );
+    while (retryCount < maxRetries) {
+      try {
+        // Validate required fields
+        if (!callData.user_id || !callData.phone_number) {
+          console.error("Missing required fields for call tracking:", callData);
+          return;
+        }
+
+        // Calculate call costs based on status and duration
+        let voiceCost = 0;
+        let sipTrunkingCost = 0;
+        let totalCost = 0;
+        let destinationCountry = callData.destination_country;
+
+        // If destination country not provided, try to extract from phone number
+        if (!destinationCountry) {
+          destinationCountry = TelnyxCostCalculator.getCountryFromPhoneNumber(
+            callData.phone_number
+          );
+        }
+
+        if (callData.status === "completed" && callData.duration) {
+          // Calculate cost for completed calls
+          const costBreakdown = TelnyxCostCalculator.calculateCompletedCallCost(
+            callData.duration,
+            destinationCountry
+          );
+          voiceCost = costBreakdown.voiceCost;
+          sipTrunkingCost = costBreakdown.sipTrunkingCost;
+          totalCost = costBreakdown.totalCost;
+        } else if (
+          callData.status === "failed" ||
+          callData.status === "missed"
+        ) {
+          // Calculate minimal cost for failed/missed calls
+          const costBreakdown =
+            TelnyxCostCalculator.calculateFailedCallCost(destinationCountry);
+          voiceCost = costBreakdown.voiceCost;
+          sipTrunkingCost = costBreakdown.sipTrunkingCost;
+          totalCost = costBreakdown.totalCost;
+        }
+        // For "incoming" status, costs are 0 until call completes
+
+        const { error } = await supabase.from("calls").insert({
+          user_id: callData.user_id,
+          phone_number: callData.phone_number,
+          status: callData.status,
+          timestamp: new Date().toISOString(),
+          duration: callData.duration,
+          call_control_id: callData.call_control_id,
+          voice_cost: voiceCost,
+          sip_trunking_cost: sipTrunkingCost,
+          total_cost: totalCost,
+          currency: "USD",
+          destination_country: destinationCountry,
+        });
+
+        if (error) throw error;
+
+        // Update user statistics
+        await this.updateUserStats(callData.user_id, callData.status);
+
+        console.log("Call tracked successfully:", {
+          user_id: callData.user_id,
+          phone_number: callData.phone_number,
+          status: callData.status,
+          duration: callData.duration,
+        });
+
+        return; // Success, exit retry loop
+      } catch (error) {
+        retryCount++;
+        console.error(`Call tracking attempt ${retryCount} failed:`, error);
+
+        if (retryCount >= maxRetries) {
+          console.error("Max retries reached for call tracking, giving up");
+          // Don't throw - we don't want call tracking to break the main functionality
+          return;
+        }
+
+        // Wait before retrying (exponential backoff)
+        const delay = Math.min(1000 * Math.pow(2, retryCount - 1), 5000);
+        await new Promise((resolve) => setTimeout(resolve, delay));
       }
-
-      if (callData.status === "completed" && callData.duration) {
-        // Calculate cost for completed calls
-        const costBreakdown = TelnyxCostCalculator.calculateCompletedCallCost(
-          callData.duration,
-          destinationCountry
-        );
-        voiceCost = costBreakdown.voiceCost;
-        sipTrunkingCost = costBreakdown.sipTrunkingCost;
-        totalCost = costBreakdown.totalCost;
-      } else if (callData.status === "failed" || callData.status === "missed") {
-        // Calculate minimal cost for failed/missed calls
-        const costBreakdown =
-          TelnyxCostCalculator.calculateFailedCallCost(destinationCountry);
-        voiceCost = costBreakdown.voiceCost;
-        sipTrunkingCost = costBreakdown.sipTrunkingCost;
-        totalCost = costBreakdown.totalCost;
-      }
-      // For "incoming" status, costs are 0 until call completes
-
-      const { error } = await supabase.from("calls").insert({
-        user_id: callData.user_id,
-        phone_number: callData.phone_number,
-        status: callData.status,
-        timestamp: new Date().toISOString(),
-        duration: callData.duration,
-        call_control_id: callData.call_control_id,
-        voice_cost: voiceCost,
-        sip_trunking_cost: sipTrunkingCost,
-        total_cost: totalCost,
-        currency: "USD",
-        destination_country: destinationCountry,
-      });
-
-      if (error) throw error;
-
-      // Update user statistics
-      await this.updateUserStats(callData.user_id, callData.status);
-    } catch (error) {
-      console.error("Error tracking call:", error);
-      // Don't throw - we don't want call tracking to break the main functionality
     }
   }
 

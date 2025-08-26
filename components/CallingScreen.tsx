@@ -16,6 +16,7 @@ interface CallingScreenProps {
   isConnecting?: boolean;
   isCallActive?: boolean;
   callState?: string;
+  callDuration?: number;
 }
 
 const CallingScreen: React.FC<CallingScreenProps> = ({
@@ -27,6 +28,7 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   isConnecting = false,
   isCallActive = false,
   callState = "",
+  callDuration = 0,
 }) => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -197,9 +199,43 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
           : isConnecting
           ? callState === "trying"
             ? "Connecting..."
+            : callState === "ringing"
+            ? "Ringing..."
             : "Waiting for answer..."
           : "Call ended"}
       </div>
+
+      {/* Call Duration Display */}
+      {isCallActive && callDuration > 0 && (
+        <div className="mt-2 text-xs text-gray-400 text-center">
+          Duration: {Math.floor(callDuration / 60)}:
+          {(callDuration % 60).toString().padStart(2, "0")}
+        </div>
+      )}
+
+      {/* Call Progress Indicator */}
+      {(isConnecting || isCallActive) && !error && (
+        <div className="mt-4">
+          <div className="flex items-center justify-center space-x-2">
+            <div className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"></div>
+            <div
+              className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"
+              style={{ animationDelay: "0.2s" }}
+            ></div>
+            <div
+              className="w-2 h-2 bg-blue-500 rounded-full animate-pulse"
+              style={{ animationDelay: "0.4s" }}
+            ></div>
+          </div>
+          <div className="mt-2 text-xs text-gray-400 text-center">
+            {callState === "connecting" && "Establishing connection..."}
+            {callState === "trying" && "Dialing number..."}
+            {callState === "ringing" && "Phone is ringing..."}
+            {callState === "answered" && "Call connected"}
+            {callState === "active" && "Call in progress"}
+          </div>
+        </div>
+      )}
     </div>
   );
 };

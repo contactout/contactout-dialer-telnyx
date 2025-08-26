@@ -22,6 +22,8 @@ export default function Home() {
   const [showCallHistory, setShowCallHistory] = useState(false);
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminStatusChecked, setAdminStatusChecked] = useState(false);
+  const [callStartTime, setCallStartTime] = useState<number | null>(null);
+  const [callDuration, setCallDuration] = useState(0);
   const { isMobile } = useDeviceDetection();
   const { user, loading, signOut } = useAuth();
 
@@ -161,6 +163,26 @@ export default function Home() {
       return () => clearTimeout(timer);
     }
   }, [error, isConnecting, isCallActive, hangupCall]);
+
+  // Update call duration when call is active
+  useEffect(() => {
+    let interval: NodeJS.Timeout | null = null;
+
+    if (isCallActive && callStartTime) {
+      interval = setInterval(() => {
+        const duration = Math.floor((Date.now() - callStartTime) / 1000);
+        setCallDuration(duration);
+      }, 1000);
+    } else {
+      setCallDuration(0);
+    }
+
+    return () => {
+      if (interval) {
+        clearInterval(interval);
+      }
+    };
+  }, [isCallActive, callStartTime]);
 
   // Monitor network quality and apply graceful degradation
   useEffect(() => {
@@ -385,6 +407,7 @@ export default function Home() {
           isConnecting={isConnecting}
           isCallActive={isCallActive}
           callState={callState || ""}
+          callDuration={callDuration}
         />
 
         {/* Debug Audio Button */}

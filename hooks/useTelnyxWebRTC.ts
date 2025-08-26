@@ -414,10 +414,34 @@ export const useTelnyxWebRTC = (
           console.log("Network quality update:", quality);
           if (quality && quality.score) {
             const score = quality.score;
-            if (score >= 0.8) setNetworkQuality("excellent");
-            else if (score >= 0.6) setNetworkQuality("good");
-            else if (score >= 0.4) setNetworkQuality("fair");
-            else setNetworkQuality("poor");
+            let newQuality: "excellent" | "good" | "fair" | "poor";
+
+            if (score >= 0.8) {
+              newQuality = "excellent";
+            } else if (score >= 0.6) {
+              newQuality = "good";
+            } else if (score >= 0.4) {
+              newQuality = "fair";
+            } else {
+              newQuality = "poor";
+            }
+
+            setNetworkQuality(newQuality);
+
+            // Show user notification for poor network quality
+            if (newQuality === "poor" || newQuality === "fair") {
+              console.warn(`Network quality degraded to ${newQuality}`);
+              if (isCallActive || isConnecting) {
+                setError(
+                  `Poor network detected (${newQuality}) - audio quality may be reduced`
+                );
+              }
+            } else if (newQuality === "excellent" || newQuality === "good") {
+              // Clear network-related errors when quality improves
+              if (error && error.includes("network")) {
+                setError(null);
+              }
+            }
           }
         });
 
@@ -764,6 +788,73 @@ export const useTelnyxWebRTC = (
     }
   }, []);
 
+  // Centralized error handling function
+  const handleError = useCallback(
+    (errorType: string, error: any, call?: any) => {
+      console.error(`${errorType}:`, error);
+
+      let errorMessage = "An unexpected error occurred";
+
+      switch (errorType) {
+        case "connection":
+          errorMessage =
+            "Connection failed - please check your internet connection";
+          break;
+        case "microphone":
+          errorMessage =
+            "Microphone access required - please allow microphone access";
+          break;
+        case "call_timeout":
+          errorMessage =
+            "Call timeout - phone number may be invalid or unavailable";
+          break;
+        case "call_failed":
+          errorMessage = "Call failed - please try again";
+          break;
+        case "call_rejected":
+          errorMessage = "Call rejected - number may be invalid or unavailable";
+          break;
+        case "audio_setup":
+          errorMessage = "Audio setup failed - call quality may be affected";
+          break;
+        case "network_poor":
+          errorMessage = "Poor network detected - audio quality may be reduced";
+          break;
+        case "invalid_number":
+          errorMessage = "Invalid phone number - please check and try again";
+          break;
+        default:
+          if (error?.message) {
+            errorMessage = error.message;
+          } else if (typeof error === "string") {
+            errorMessage = error;
+          }
+      }
+
+      setError(errorMessage);
+
+      // Track error in database if call context is available
+      if (call && userId) {
+        DatabaseService.trackCall({
+          user_id: userId,
+          phone_number: call.phoneNumber || config.phoneNumber,
+          status: "failed",
+          call_control_id: call.call_control_id,
+        });
+      }
+
+      // Notify parent of error
+      if (onCallStatusChange) {
+        onCallStatusChange(
+          "failed",
+          call?.phoneNumber || config.phoneNumber,
+          undefined
+        );
+      }
+    },
+    [userId, config.phoneNumber, onCallStatusChange]
+  );
+
   // State transition function to ensure valid state changes
   const transitionCallState = useCallback(
     (newState: CallState, call?: any) => {
@@ -787,6 +878,12 @@ export const useTelnyxWebRTC = (
         return;
       }
 
+      // Validate call object for active states
+      if ((newState === "answered" || newState === "active") && !call) {
+        console.error("Call object required for active states");
+        return;
+      }
+
       setCallState(newState);
 
       // Update related states based on call state
@@ -800,6 +897,7 @@ export const useTelnyxWebRTC = (
           setError(null);
           cleanupAudio();
           stopCallStreaming();
+          cleanupTimeouts();
           break;
         case "connecting":
         case "trying":
@@ -823,6 +921,7 @@ export const useTelnyxWebRTC = (
           if (!callStartTime) {
             setCallStartTime(Date.now());
           }
+          cleanupTimeouts(); // Clear timeouts when call becomes active
           break;
         case "ended":
           setIsConnecting(false);
@@ -832,6 +931,7 @@ export const useTelnyxWebRTC = (
           setError(null);
           cleanupAudio();
           stopCallStreaming();
+          cleanupTimeouts();
           break;
         case "failed":
         case "error":
@@ -841,10 +941,11 @@ export const useTelnyxWebRTC = (
           setCallControlId(null);
           cleanupAudio();
           stopCallStreaming();
+          cleanupTimeouts();
           break;
       }
     },
-    [callState, callStartTime, cleanupAudio, stopCallStreaming]
+    [callState, callStartTime, cleanupAudio, stopCallStreaming, cleanupTimeouts]
   );
 
   // Network reconnection logic with exponential backoff
@@ -911,7 +1012,7 @@ export const useTelnyxWebRTC = (
       }
 
       if (!hasMicrophoneAccess) {
-        setError("Microphone access required for calls");
+        handleError("microphone", "Microphone access required for calls");
         return;
       }
 
@@ -1409,8 +1510,7 @@ export const useTelnyxWebRTC = (
 
         return handleCallCreation(call);
       } catch (err: any) {
-        console.error("Failed to make call:", err);
-        setError(err.message || "Failed to make call");
+        handleError("call_failed", err);
         setIsConnecting(false);
       }
     },
