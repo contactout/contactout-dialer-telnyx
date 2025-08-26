@@ -10,11 +10,17 @@ declare global {
 interface CallingScreenProps {
   phoneNumber: string;
   onHangup: () => void;
+  error?: string | null;
+  onReturnToDialPad?: () => void;
+  onRetry?: () => void;
 }
 
 const CallingScreen: React.FC<CallingScreenProps> = ({
   phoneNumber,
   onHangup,
+  error,
+  onReturnToDialPad,
+  onRetry,
 }) => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const oscillatorRef = useRef<OscillatorNode | null>(null);
@@ -29,35 +35,44 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
           window.webkitAudioContext)();
         gainNodeRef.current = audioContextRef.current.createGain();
 
-        // Set up ringtone pattern
+        // Set up proper phone ringtone pattern
         const playRingtone = () => {
           if (!audioContextRef.current || !gainNodeRef.current) return;
 
           const now = audioContextRef.current.currentTime;
 
-          // Create oscillator for this ringtone cycle
-          const osc = audioContextRef.current.createOscillator();
+          // Create two oscillators for a two-tone ringtone (like traditional phones)
+          const osc1 = audioContextRef.current.createOscillator();
+          const osc2 = audioContextRef.current.createOscillator();
           const gain = audioContextRef.current.createGain();
 
-          osc.connect(gain);
+          // Connect oscillators to gain node, then to destination
+          osc1.connect(gain);
+          osc2.connect(gain);
           gain.connect(audioContextRef.current.destination);
 
-          // Set frequency and type
-          osc.frequency.setValueAtTime(800, now);
-          osc.type = "sine";
+          // Set frequencies for two-tone ringtone (common phone frequencies)
+          osc1.frequency.setValueAtTime(480, now); // Lower tone
+          osc2.frequency.setValueAtTime(620, now); // Higher tone
+          osc1.type = "sine";
+          osc2.type = "sine";
 
           // Create envelope for the ringtone pattern
+          // Ringtone should be on for about 1 second, then off for 2 seconds
           gain.gain.setValueAtTime(0, now);
-          gain.gain.linearRampToValueAtTime(0.3, now + 0.1);
-          gain.gain.linearRampToValueAtTime(0, now + 0.4);
+          gain.gain.linearRampToValueAtTime(0.25, now + 0.05); // Fade in
+          gain.gain.setValueAtTime(0.25, now + 0.95); // Hold
+          gain.gain.linearRampToValueAtTime(0, now + 1.0); // Fade out
 
-          // Start and stop
-          osc.start(now);
-          osc.stop(now + 0.4);
+          // Start and stop oscillators
+          osc1.start(now);
+          osc2.start(now);
+          osc1.stop(now + 1.0);
+          osc2.stop(now + 1.0);
         };
 
-        // Play ringtone every 500ms
-        intervalRef.current = setInterval(playRingtone, 500);
+        // Play ringtone every 3 seconds (1 second ring, 2 seconds silence)
+        intervalRef.current = setInterval(playRingtone, 3000);
 
         // Play first ringtone immediately
         playRingtone();
@@ -85,6 +100,44 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
 
   return (
     <div className="w-full max-w-sm mx-auto text-center">
+      {/* Error Display */}
+      {error && (
+        <div className="mb-6 p-4 bg-red-100 border border-red-300 rounded-lg text-red-700">
+          <div className="mb-3">
+            <svg
+              className="w-6 h-6 mx-auto text-red-500"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path
+                fillRule="evenodd"
+                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-1 1v4a1 1 0 102 0V6a1 1 0 00-1-1z"
+                clipRule="evenodd"
+              />
+            </svg>
+          </div>
+          <div className="text-sm font-medium mb-3">{error}</div>
+          <div className="flex gap-2">
+            {onRetry && (
+              <button
+                onClick={onRetry}
+                className="flex-1 py-2 px-4 bg-blue-500 hover:bg-blue-600 text-white rounded-lg transition-colors text-sm font-medium"
+              >
+                Retry Call
+              </button>
+            )}
+            {onReturnToDialPad && (
+              <button
+                onClick={onReturnToDialPad}
+                className="flex-1 py-2 px-4 bg-red-500 hover:bg-red-600 text-white rounded-lg transition-colors text-sm font-medium"
+              >
+                Return to Dial Pad
+              </button>
+            )}
+          </div>
+        </div>
+      )}
+
       {/* Calling Animation */}
       <div className="mb-8">
         <div className="w-24 h-24 bg-blue-500 rounded-full mx-auto mb-4 flex items-center justify-center">

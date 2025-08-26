@@ -45,12 +45,21 @@ export const useTelnyxWebRTC = (
   const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState(false);
   const [callControlId, setCallControlId] = useState<string | null>(null);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
+  const [reconnectionAttempts, setReconnectionAttempts] = useState(0);
+  const [networkQuality, setNetworkQuality] = useState<
+    "excellent" | "good" | "fair" | "poor"
+  >("good");
+  const [isReconnecting, setIsReconnecting] = useState(false);
 
   // Refs for audio elements
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
   const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
   const localStreamRef = useRef<MediaStream | null>(null);
   const websocketRef = useRef<WebSocket | null>(null);
+
+  // Refs for audio context and gain node for fallback
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const gainNodeRef = useRef<GainNode | null>(null);
 
   useEffect(() => {
     if (
@@ -259,6 +268,102 @@ export const useTelnyxWebRTC = (
           }
         });
 
+        // Handle call failures (including invalid phone numbers)
+        telnyxClient.on("call.failed", (call: any) => {
+          console.log("Call failed event received:", call);
+          setIsCallActive(false);
+          setIsConnecting(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          setCallStartTime(null);
+          setError("Call failed - Invalid phone number or connection error");
+          cleanupAudio();
+          stopCallStreaming();
+
+          // Track failed call if userId is provided
+          if (userId) {
+            DatabaseService.trackCall({
+              user_id: userId,
+              phone_number: call.phoneNumber || config.phoneNumber,
+              status: "failed",
+              call_control_id: call.call_control_id,
+            });
+          }
+
+          // Notify parent of failed call
+          if (onCallStatusChange) {
+            onCallStatusChange(
+              "failed",
+              call.phoneNumber || config.phoneNumber,
+              undefined
+            );
+          }
+        });
+
+        // Handle call rejections
+        telnyxClient.on("call.rejected", (call: any) => {
+          console.log("Call rejected event received:", call);
+          setIsCallActive(false);
+          setIsConnecting(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          setCallStartTime(null);
+          setError("Call rejected - Number may be invalid or unavailable");
+          cleanupAudio();
+          stopCallStreaming();
+
+          // Track rejected call if userId is provided
+          if (userId) {
+            DatabaseService.trackCall({
+              user_id: userId,
+              phone_number: call.phoneNumber || config.phoneNumber,
+              status: "failed",
+              call_control_id: call.call_control_id,
+            });
+          }
+
+          // Notify parent of rejected call
+          if (onCallStatusChange) {
+            onCallStatusChange(
+              "failed",
+              call.phoneNumber || config.phoneNumber,
+              undefined
+            );
+          }
+        });
+
+        // Handle call errors
+        telnyxClient.on("call.error", (call: any, error: any) => {
+          console.log("Call error event received:", call, error);
+          setIsCallActive(false);
+          setIsConnecting(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          setCallStartTime(null);
+          setError(`Call error: ${error?.message || "Unknown error occurred"}`);
+          cleanupAudio();
+          stopCallStreaming();
+
+          // Track failed call if userId is provided
+          if (userId) {
+            DatabaseService.trackCall({
+              user_id: userId,
+              phone_number: call.phoneNumber || config.phoneNumber,
+              status: "failed",
+              call_control_id: call.call_control_id,
+            });
+          }
+
+          // Notify parent of failed call
+          if (onCallStatusChange) {
+            onCallStatusChange(
+              "failed",
+              call.phoneNumber || config.phoneNumber,
+              undefined
+            );
+          }
+        });
+
         telnyxClient.on("call.destroy", (call: any) => {
           console.log("Call destroy event received");
           const duration = callStartTime
@@ -278,6 +383,51 @@ export const useTelnyxWebRTC = (
               call.phoneNumber || config.phoneNumber,
               duration
             );
+          }
+        });
+
+        // Network resilience and monitoring
+        telnyxClient.on("connection.lost", () => {
+          console.log("Connection lost - attempting to reconnect");
+          setIsConnected(false);
+          setError("Connection lost - attempting to reconnect...");
+          setIsReconnecting(true);
+
+          // Attempt reconnection with exponential backoff
+          attemptReconnection();
+        });
+
+        telnyxClient.on("connection.restored", () => {
+          console.log("Connection restored successfully");
+          setIsConnected(true);
+          setIsReconnecting(false);
+          setReconnectionAttempts(0);
+          setError(null);
+          setNetworkQuality("good");
+        });
+
+        telnyxClient.on("connection.failed", () => {
+          console.log("Reconnection failed");
+          setIsReconnecting(false);
+          setError(
+            "Failed to reconnect - please check your connection and try again"
+          );
+
+          // Reset reconnection attempts after a delay
+          setTimeout(() => {
+            setReconnectionAttempts(0);
+          }, 30000); // 30 seconds
+        });
+
+        // Network quality monitoring
+        telnyxClient.on("network.quality", (quality: any) => {
+          console.log("Network quality update:", quality);
+          if (quality && quality.score) {
+            const score = quality.score;
+            if (score >= 0.8) setNetworkQuality("excellent");
+            else if (score >= 0.6) setNetworkQuality("good");
+            else if (score >= 0.4) setNetworkQuality("fair");
+            else setNetworkQuality("poor");
           }
         });
 
@@ -608,6 +758,43 @@ export const useTelnyxWebRTC = (
     }
   }, []);
 
+  // Network reconnection logic with exponential backoff
+  const attemptReconnection = useCallback(async () => {
+    if (reconnectionAttempts >= 5) {
+      console.log("Max reconnection attempts reached");
+      setError(
+        "Unable to reconnect after multiple attempts. Please refresh the page."
+      );
+      setIsReconnecting(false);
+      return;
+    }
+
+    const delay = Math.min(1000 * Math.pow(2, reconnectionAttempts), 30000); // Max 30 seconds
+    console.log(
+      `Attempting reconnection in ${delay}ms (attempt ${
+        reconnectionAttempts + 1
+      })`
+    );
+
+    setTimeout(async () => {
+      try {
+        if (client && typeof client.connect === "function") {
+          console.log("Attempting to reconnect...");
+          await client.connect();
+          setReconnectionAttempts((prev) => prev + 1);
+        }
+      } catch (err) {
+        console.error("Reconnection attempt failed:", err);
+        setReconnectionAttempts((prev) => prev + 1);
+
+        // Try again if we haven't reached max attempts
+        if (reconnectionAttempts < 4) {
+          attemptReconnection();
+        }
+      }
+    }, delay);
+  }, [client, reconnectionAttempts]);
+
   // Make a call
   const makeCall = useCallback(
     async (phoneNumber: string) => {
@@ -616,8 +803,21 @@ export const useTelnyxWebRTC = (
         return;
       }
 
-      if (!phoneNumber) {
-        setError("Phone number is required");
+      // Basic phone number validation
+      const cleanedNumber = phoneNumber.replace(/[^\d+]/g, "");
+      if (cleanedNumber.length < 7) {
+        setError("Phone number must be at least 7 digits");
+        return;
+      }
+
+      // Additional validation for common invalid patterns
+      if (
+        cleanedNumber === "0000000000" ||
+        cleanedNumber === "1111111111" ||
+        cleanedNumber === "9999999999" ||
+        cleanedNumber === "1234567890"
+      ) {
+        setError("Please enter a valid phone number");
         return;
       }
 
@@ -744,6 +944,113 @@ export const useTelnyxWebRTC = (
               console.error("Failed to set up ended event handler:", err);
             }
 
+            // Add missing state handlers for comprehensive call management
+            try {
+              eventHandler("busy", () => {
+                console.log("Call busy - number is busy");
+                setIsCallActive(false);
+                setIsConnecting(false);
+                setCurrentCall(null);
+                setCallControlId(null);
+                setError("Number is busy - please try again later");
+                cleanupAudio();
+                stopCallStreaming();
+
+                // Track failed call if userId is provided
+                if (userId) {
+                  DatabaseService.trackCall({
+                    user_id: userId,
+                    phone_number: phoneNumber,
+                    status: "failed",
+                  });
+                }
+
+                // Notify parent of failed call
+                if (onCallStatusChange) {
+                  onCallStatusChange("failed", phoneNumber, undefined);
+                }
+              });
+            } catch (err) {
+              console.error("Failed to set up busy event handler:", err);
+            }
+
+            try {
+              eventHandler("no-answer", () => {
+                console.log("Call no-answer - no one answered");
+                setIsCallActive(false);
+                setIsConnecting(false);
+                setCurrentCall(null);
+                setCallControlId(null);
+                setError("No answer - please try again later");
+                cleanupAudio();
+                stopCallStreaming();
+
+                // Track failed call if userId is provided
+                if (userId) {
+                  DatabaseService.trackCall({
+                    user_id: userId,
+                    phone_number: phoneNumber,
+                    status: "failed",
+                  });
+                }
+
+                // Notify parent of failed call
+                if (onCallStatusChange) {
+                  onCallStatusChange("failed", phoneNumber, undefined);
+                }
+              });
+            } catch (err) {
+              console.error("Failed to set up no-answer event handler:", err);
+            }
+
+            try {
+              eventHandler("forwarded", () => {
+                console.log("Call forwarded - call was forwarded");
+                // Keep call active but update status
+                setError("Call was forwarded to another number");
+              });
+            } catch (err) {
+              console.error("Failed to set up forwarded event handler:", err);
+            }
+
+            try {
+              eventHandler("queued", () => {
+                console.log("Call queued - waiting in queue");
+                setError("Call is in queue - please wait");
+              });
+            } catch (err) {
+              console.error("Failed to set up queued event handler:", err);
+            }
+
+            try {
+              eventHandler("cancelled", () => {
+                console.log("Call cancelled - call was cancelled");
+                setIsCallActive(false);
+                setIsConnecting(false);
+                setCurrentCall(null);
+                setCallControlId(null);
+                setError("Call was cancelled");
+                cleanupAudio();
+                stopCallStreaming();
+
+                // Track cancelled call if userId is provided
+                if (userId) {
+                  DatabaseService.trackCall({
+                    user_id: userId,
+                    phone_number: phoneNumber,
+                    status: "failed",
+                  });
+                }
+
+                // Notify parent of cancelled call
+                if (onCallStatusChange) {
+                  onCallStatusChange("failed", phoneNumber, undefined);
+                }
+              });
+            } catch (err) {
+              console.error("Failed to set up cancelled event handler:", err);
+            }
+
             try {
               eventHandler("remoteStream", (stream: MediaStream) => {
                 console.log("Remote stream received:", stream);
@@ -754,6 +1061,77 @@ export const useTelnyxWebRTC = (
             } catch (err) {
               console.error(
                 "Failed to set up remoteStream event handler:",
+                err
+              );
+            }
+
+            // Add failure event handlers to the call object itself
+            try {
+              call.on("failed", (error: any) => {
+                console.log("Call failed event on call object:", error);
+                setIsCallActive(false);
+                setIsConnecting(false);
+                setCurrentCall(null);
+                setCallControlId(null);
+                setError(
+                  `Call failed: ${
+                    error?.message || "Invalid phone number or connection error"
+                  }`
+                );
+                cleanupAudio();
+                stopCallStreaming();
+
+                // Track failed call if userId is provided
+                if (userId) {
+                  DatabaseService.trackCall({
+                    user_id: userId,
+                    phone_number: phoneNumber,
+                    status: "failed",
+                  });
+                }
+
+                // Notify parent of failed call
+                if (onCallStatusChange) {
+                  onCallStatusChange("failed", phoneNumber, undefined);
+                }
+              });
+            } catch (err) {
+              console.error(
+                "Failed to set up failed event handler on call:",
+                err
+              );
+            }
+
+            try {
+              call.on("error", (error: any) => {
+                console.log("Call error event on call object:", error);
+                setIsCallActive(false);
+                setIsConnecting(false);
+                setCurrentCall(null);
+                setCallControlId(null);
+                setError(
+                  `Call error: ${error?.message || "Unknown error occurred"}`
+                );
+                cleanupAudio();
+                stopCallStreaming();
+
+                // Track failed call if userId is provided
+                if (userId) {
+                  DatabaseService.trackCall({
+                    user_id: userId,
+                    phone_number: phoneNumber,
+                    status: "failed",
+                  });
+                }
+
+                // Notify parent of failed call
+                if (onCallStatusChange) {
+                  onCallStatusChange("failed", phoneNumber, undefined);
+                }
+              });
+            } catch (err) {
+              console.error(
+                "Failed to set up error event handler on call:",
                 err
               );
             }
@@ -794,14 +1172,34 @@ export const useTelnyxWebRTC = (
 
           setCurrentCall(call);
 
-          // Set a timeout to catch silent failures
+          // Set a timeout to catch silent failures (including invalid numbers)
           setTimeout(() => {
             if (isConnecting && !isCallActive) {
-              console.log("Call timeout - no response after 10 seconds");
+              console.log("Call timeout - no response after 5 seconds");
               setIsConnecting(false);
-              setError("Call timeout - Check your Telnyx configuration");
+              setCurrentCall(null);
+              setCallControlId(null);
+              setError(
+                "Call timeout - Phone number may be invalid or unavailable"
+              );
+              cleanupAudio();
+              stopCallStreaming();
+
+              // Track failed call if userId is provided
+              if (userId) {
+                DatabaseService.trackCall({
+                  user_id: userId,
+                  phone_number: phoneNumber,
+                  status: "failed",
+                });
+              }
+
+              // Notify parent of failed call
+              if (onCallStatusChange) {
+                onCallStatusChange("failed", phoneNumber, undefined);
+              }
             }
-          }, 10000);
+          }, 5000);
         };
 
         // Validate that client has newCall method
@@ -967,6 +1365,82 @@ export const useTelnyxWebRTC = (
     [currentCall]
   );
 
+  // Error recovery: Retry failed calls with exponential backoff
+  const retryCall = useCallback(
+    async (phoneNumber: string, attempts = 3) => {
+      console.log(`Retrying call to ${phoneNumber} (attempt ${attempts})`);
+
+      for (let i = 0; i < attempts; i++) {
+        try {
+          console.log(`Retry attempt ${i + 1}/${attempts}`);
+          await makeCall(phoneNumber);
+          break; // Success, exit retry loop
+        } catch (err) {
+          console.error(`Retry attempt ${i + 1} failed:`, err);
+
+          if (i === attempts - 1) {
+            // Last attempt failed
+            setError(
+              `Call failed after ${attempts} attempts. Please check the number and try again.`
+            );
+            throw err;
+          }
+
+          // Wait before next retry with exponential backoff
+          const delay = Math.min(1000 * Math.pow(2, i), 10000); // Max 10 seconds
+          console.log(`Waiting ${delay}ms before next retry...`);
+          await new Promise((resolve) => setTimeout(resolve, delay));
+        }
+      }
+    },
+    [makeCall]
+  );
+
+  // Error recovery: Fallback audio configuration
+  const setupFallbackAudio = useCallback(() => {
+    console.log("Setting up fallback audio configuration");
+
+    try {
+      // Try to create audio context with fallback options
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext ||
+          window.webkitAudioContext)({
+          sampleRate: 8000, // Lower sample rate for better compatibility
+          latencyHint: "interactive",
+        });
+      }
+
+      // Set up fallback gain node
+      if (!gainNodeRef.current) {
+        gainNodeRef.current = audioContextRef.current.createGain();
+        gainNodeRef.current.gain.value = 0.5; // Lower volume for fallback
+      }
+
+      console.log("Fallback audio configuration set up successfully");
+    } catch (err) {
+      console.error("Failed to set up fallback audio:", err);
+      setError("Audio setup failed - some features may not work properly");
+    }
+  }, []);
+
+  // Error recovery: Graceful degradation for poor network conditions
+  const handleNetworkDegradation = useCallback(() => {
+    console.log("Network degradation detected, applying graceful degradation");
+
+    if (networkQuality === "poor" || networkQuality === "fair") {
+      // Show user notification about network quality
+      setError(
+        "Poor network detected - audio quality may be reduced for stability"
+      );
+
+      // Note: AudioContext sampleRate is read-only, so we can't modify it
+      // Instead, we rely on the browser's automatic adaptation
+      console.log(
+        "Network quality is poor - relying on browser audio adaptation"
+      );
+    }
+  }, [networkQuality]);
+
   // Add browser tab close event listener for auto hangup
   useEffect(() => {
     const handleBeforeUnload = (event: BeforeUnloadEvent) => {
@@ -1020,5 +1494,10 @@ export const useTelnyxWebRTC = (
     hangupCall,
     sendDTMF,
     debugAudioSetup,
+    retryCall,
+    setupFallbackAudio,
+    handleNetworkDegradation,
+    networkQuality,
+    isReconnecting,
   };
 };

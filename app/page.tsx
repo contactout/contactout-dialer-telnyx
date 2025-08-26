@@ -53,6 +53,11 @@ export default function Home() {
     hangupCall,
     sendDTMF,
     debugAudioSetup,
+    retryCall,
+    setupFallbackAudio,
+    handleNetworkDegradation,
+    networkQuality,
+    isReconnecting,
   } = useTelnyxWebRTC(
     telnyxConfig,
     user?.id,
@@ -87,6 +92,33 @@ export default function Home() {
 
     checkAdminStatus();
   }, [user]);
+
+  // Auto-return to dial pad when call errors occur
+  useEffect(() => {
+    if (error && (isConnecting || isCallActive)) {
+      // Wait a moment to show the error, then automatically return to dial pad
+      const timer = setTimeout(() => {
+        console.log("Auto-returning to dial pad due to error:", error);
+        hangupCall();
+        setPhoneNumber("");
+      }, 3000); // Show error for 3 seconds before auto-return
+
+      return () => clearTimeout(timer);
+    }
+  }, [error, isConnecting, isCallActive, hangupCall]);
+
+  // Monitor network quality and apply graceful degradation
+  useEffect(() => {
+    if (networkQuality === "poor" || networkQuality === "fair") {
+      console.log("Network quality degraded, applying graceful degradation");
+      handleNetworkDegradation();
+    }
+  }, [networkQuality, handleNetworkDegradation]);
+
+  // Set up fallback audio configuration on component mount
+  useEffect(() => {
+    setupFallbackAudio();
+  }, [setupFallbackAudio]);
 
   // Show loading spinner while checking auth
   if (loading) {
@@ -201,6 +233,42 @@ export default function Home() {
             {isConnected ? "Connected" : "Disconnected"}
           </div>
 
+          {/* Network Quality Status */}
+          {isConnected && (
+            <div
+              className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+                networkQuality === "excellent"
+                  ? "bg-green-100 text-green-800"
+                  : networkQuality === "good"
+                  ? "bg-blue-100 text-blue-800"
+                  : networkQuality === "fair"
+                  ? "bg-yellow-100 text-yellow-800"
+                  : "bg-red-100 text-red-800"
+              }`}
+            >
+              <div
+                className={`w-2 h-2 rounded-full mr-2 ${
+                  networkQuality === "excellent"
+                    ? "bg-green-500"
+                    : networkQuality === "good"
+                    ? "bg-blue-500"
+                    : networkQuality === "fair"
+                    ? "bg-yellow-500"
+                    : "bg-red-500"
+                }`}
+              ></div>
+              Network: {networkQuality}
+            </div>
+          )}
+
+          {/* Reconnection Status */}
+          {isReconnecting && (
+            <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-orange-100 text-orange-800">
+              <div className="w-2 h-2 bg-orange-500 rounded-full mr-2 animate-pulse"></div>
+              Reconnecting...
+            </div>
+          )}
+
           {/* Microphone Status */}
           <div
             className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
@@ -227,7 +295,22 @@ export default function Home() {
         </div>
 
         {/* Calling Screen */}
-        <CallingScreen phoneNumber={phoneNumber} onHangup={handleHangup} />
+        <CallingScreen
+          phoneNumber={phoneNumber}
+          onHangup={handleHangup}
+          error={error}
+          onReturnToDialPad={() => {
+            // Clear error and return to dial pad
+            hangupCall();
+            setPhoneNumber("");
+          }}
+          onRetry={() => {
+            // Retry the call with error recovery
+            if (phoneNumber) {
+              retryCall(phoneNumber, 3);
+            }
+          }}
+        />
 
         {/* Debug Audio Button */}
         <div className="mt-4 text-center">
