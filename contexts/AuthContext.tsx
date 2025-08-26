@@ -1,9 +1,16 @@
 "use client";
 
-import { createContext, useContext, useEffect, useState } from "react";
+import {
+  createContext,
+  useContext,
+  useEffect,
+  useState,
+  useCallback,
+} from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
 import { DatabaseService } from "@/lib/database";
+import SessionTimeoutWarning from "@/components/SessionTimeoutWarning";
 
 interface AuthContextType {
   user: User | null;
@@ -21,6 +28,13 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [session, setSession] = useState<Session | null>(null);
   const [loading, setLoading] = useState(true);
   const [authError, setAuthError] = useState<string | null>(null);
+  const [sessionTimeout, setSessionTimeout] = useState<NodeJS.Timeout | null>(
+    null
+  );
+  const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
+
+  // Session timeout duration (4 hours in milliseconds)
+  const SESSION_TIMEOUT_DURATION = 4 * 60 * 60 * 1000; // 4 hours
 
   // Domain validation function
   const isContactOutDomain = (email: string): boolean => {
@@ -29,7 +43,62 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     );
   };
 
+  // Reset session timeout
+  const resetSessionTimeout = useCallback(() => {
+    // Clear existing timeout
+    if (sessionTimeout) {
+      clearTimeout(sessionTimeout);
+    }
+
+    // Set session start time
+    setSessionStartTime(Date.now());
+
+    // Set new timeout
+    const timeout = setTimeout(() => {
+      console.log("Session expired due to inactivity");
+      signOut();
+      setAuthError("Session expired due to inactivity. Please log in again.");
+    }, SESSION_TIMEOUT_DURATION);
+
+    setSessionTimeout(timeout);
+  }, [sessionTimeout]);
+
+  // Activity tracking
+  const trackUserActivity = useCallback(() => {
+    if (user) {
+      resetSessionTimeout();
+    }
+  }, [user, resetSessionTimeout]);
+
   useEffect(() => {
+    // Set up loading timeout to prevent stuck loading screens
+    const loadingTimeout = setTimeout(() => {
+      if (loading) {
+        console.warn("Loading timeout reached, forcing loading state to false");
+        setLoading(false);
+        setAuthError("Loading timeout. Please refresh the page or try again.");
+      }
+    }, 10000); // 10 second timeout
+
+    // Set up activity tracking event listeners
+    const activityEvents = [
+      "mousedown",
+      "mousemove",
+      "keypress",
+      "scroll",
+      "touchstart",
+      "click",
+    ];
+
+    const handleActivity = () => {
+      trackUserActivity();
+    };
+
+    // Add event listeners for user activity
+    activityEvents.forEach((event) => {
+      document.addEventListener(event, handleActivity, { passive: true });
+    });
+
     // Check if Supabase credentials are configured
     const supabaseUrl = process.env.NEXT_PUBLIC_SUPABASE_URL;
     const supabaseKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY;
@@ -91,6 +160,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
         // Clear any previous auth errors for valid users
         setAuthError(null);
+
+        // Set up session timeout for new login
+        resetSessionTimeout();
       }
 
       setSession(session);
@@ -98,8 +170,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       setLoading(false);
     });
 
-    return () => subscription.unsubscribe();
-  }, []);
+    return () => {
+      // Clean up loading timeout
+      clearTimeout(loadingTimeout);
+
+      // Clean up event listeners
+      activityEvents.forEach((event) => {
+        document.removeEventListener(event, handleActivity);
+      });
+
+      // Clean up subscription
+      subscription.unsubscribe();
+
+      // Clean up session timeout
+      if (sessionTimeout) {
+        clearTimeout(sessionTimeout);
+      }
+    };
+  }, [sessionTimeout, trackUserActivity]);
 
   const signInWithGoogle = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -114,6 +202,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    // Clear session timeout
+    if (sessionTimeout) {
+      clearTimeout(sessionTimeout);
+      setSessionTimeout(null);
+    }
+
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error("Error signing out:", error.message);
@@ -131,7 +225,22 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     authError,
   };
 
-  return <AuthContext.Provider value={value}>{children}</AuthContext.Provider>;
+  // Calculate time remaining for session timeout warning
+  const timeRemaining = sessionStartTime
+    ? Math.max(0, SESSION_TIMEOUT_DURATION - (Date.now() - sessionStartTime))
+    : 0;
+
+  return (
+    <AuthContext.Provider value={value}>
+      {children}
+      <SessionTimeoutWarning
+        isVisible={!!user && !loading}
+        timeRemaining={timeRemaining}
+        onExtendSession={trackUserActivity}
+        onLogout={signOut}
+      />
+    </AuthContext.Provider>
+  );
 }
 
 export function useAuth() {
