@@ -68,8 +68,18 @@ export default function Home() {
   useEffect(() => {
     const checkAdminStatus = async () => {
       if (user) {
-        const adminStatus = await DatabaseService.isUserAdmin(user.id);
-        setIsAdmin(adminStatus);
+        console.log("Checking admin status for user:", user.email);
+        try {
+          const adminStatus = await DatabaseService.isUserAdmin(user.id);
+          console.log("Database admin check result:", adminStatus);
+          setIsAdmin(adminStatus);
+        } catch (error) {
+          console.error("Error checking admin status:", error);
+          // Fallback to email-based admin check
+          const fallbackAdmin = user.email?.includes("admin") || false;
+          console.log("Fallback admin check result:", fallbackAdmin);
+          setIsAdmin(fallbackAdmin);
+        }
       } else {
         setIsAdmin(false);
       }
@@ -151,7 +161,7 @@ export default function Home() {
             onDTMFSettings={() => setShowDTMFSettings(true)}
             onCallHistory={() => setShowCallHistory(true)}
             onSignOut={signOut}
-            isAdmin={user?.email?.includes("admin") || isAdmin}
+            isAdmin={user?.email?.includes("admin") || isAdmin || false}
           />
         </div>
 
@@ -319,7 +329,7 @@ export default function Home() {
             onDTMFSettings={() => setShowDTMFSettings(true)}
             onCallHistory={() => setShowCallHistory(true)}
             onSignOut={signOut}
-            isAdmin={user?.email?.includes("admin") || isAdmin}
+            isAdmin={user?.email?.includes("admin") || isAdmin || false}
           />
         </div>
       </div>

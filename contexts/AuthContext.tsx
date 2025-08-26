@@ -6,6 +6,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useRef,
 } from "react";
 import { User, Session } from "@supabase/supabase-js";
 import { supabase } from "@/lib/supabase";
@@ -32,6 +33,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     null
   );
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
+  const signOutRef = useRef<(() => Promise<void>) | null>(null);
 
   // Session timeout duration (4 hours in milliseconds)
   const SESSION_TIMEOUT_DURATION = 4 * 60 * 60 * 1000; // 4 hours
@@ -56,7 +58,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     // Set new timeout
     const timeout = setTimeout(() => {
       console.log("Session expired due to inactivity");
-      signOut();
+      if (signOutRef.current) {
+        signOutRef.current();
+      }
       setAuthError("Session expired due to inactivity. Please log in again.");
     }, SESSION_TIMEOUT_DURATION);
 
@@ -187,7 +191,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearTimeout(sessionTimeout);
       }
     };
-  }, [sessionTimeout, trackUserActivity]);
+  }, [sessionTimeout, trackUserActivity, resetSessionTimeout]);
 
   const signInWithGoogle = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -216,6 +220,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setAuthError(null);
   };
 
+  // Store signOut function in ref for use in timeouts
+  useEffect(() => {
+    signOutRef.current = signOut;
+  }, []);
+
   const value = {
     user,
     session,
@@ -228,7 +237,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   // Calculate time remaining for session timeout warning
   const timeRemaining = sessionStartTime
     ? Math.max(0, SESSION_TIMEOUT_DURATION - (Date.now() - sessionStartTime))
-    : 0;
+    : SESSION_TIMEOUT_DURATION; // Don't show warning immediately after login
 
   return (
     <AuthContext.Provider value={value}>

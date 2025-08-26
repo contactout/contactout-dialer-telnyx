@@ -107,11 +107,19 @@ export class DatabaseService {
         .eq("id", userId)
         .single();
 
-      if (error) return false;
+      if (error) {
+        console.warn(
+          "Database query failed, falling back to email check:",
+          error
+        );
+        // If database is unavailable, fall back to email-based admin check
+        return false;
+      }
 
       return user?.email?.includes("admin") || false;
     } catch (error) {
       console.error("Error checking admin status:", error);
+      // Return false on any error to prevent admin access issues
       return false;
     }
   }
