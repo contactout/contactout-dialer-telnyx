@@ -1,4 +1,5 @@
 import { supabase } from "./supabase";
+import { TelnyxCostCalculator } from "./costCalculator";
 
 export interface CallRecord {
   id?: string;
@@ -8,6 +9,11 @@ export interface CallRecord {
   timestamp: Date;
   duration?: number;
   call_control_id?: string;
+  voice_cost?: number;
+  sip_trunking_cost?: number;
+  total_cost?: number;
+  currency?: string;
+  destination_country?: string;
 }
 
 export interface UserStats {
@@ -19,6 +25,9 @@ export interface UserStats {
   failed_calls: number;
   last_active: Date;
   created_at: Date;
+  total_voice_cost?: number;
+  total_sip_trunking_cost?: number;
+  total_cost?: number;
 }
 
 export class DatabaseService {
@@ -112,6 +121,38 @@ export class DatabaseService {
     callData: Omit<CallRecord, "id" | "timestamp">
   ): Promise<void> {
     try {
+      // Calculate call costs based on status and duration
+      let voiceCost = 0;
+      let sipTrunkingCost = 0;
+      let totalCost = 0;
+      let destinationCountry = callData.destination_country;
+
+      // If destination country not provided, try to extract from phone number
+      if (!destinationCountry) {
+        destinationCountry = TelnyxCostCalculator.getCountryFromPhoneNumber(
+          callData.phone_number
+        );
+      }
+
+      if (callData.status === "completed" && callData.duration) {
+        // Calculate cost for completed calls
+        const costBreakdown = TelnyxCostCalculator.calculateCompletedCallCost(
+          callData.duration,
+          destinationCountry
+        );
+        voiceCost = costBreakdown.voiceCost;
+        sipTrunkingCost = costBreakdown.sipTrunkingCost;
+        totalCost = costBreakdown.totalCost;
+      } else if (callData.status === "failed" || callData.status === "missed") {
+        // Calculate minimal cost for failed/missed calls
+        const costBreakdown =
+          TelnyxCostCalculator.calculateFailedCallCost(destinationCountry);
+        voiceCost = costBreakdown.voiceCost;
+        sipTrunkingCost = costBreakdown.sipTrunkingCost;
+        totalCost = costBreakdown.totalCost;
+      }
+      // For "incoming" status, costs are 0 until call completes
+
       const { error } = await supabase.from("calls").insert({
         user_id: callData.user_id,
         phone_number: callData.phone_number,
@@ -119,6 +160,11 @@ export class DatabaseService {
         timestamp: new Date().toISOString(),
         duration: callData.duration,
         call_control_id: callData.call_control_id,
+        voice_cost: voiceCost,
+        sip_trunking_cost: sipTrunkingCost,
+        total_cost: totalCost,
+        currency: "USD",
+        destination_country: destinationCountry,
       });
 
       if (error) throw error;
@@ -128,6 +174,97 @@ export class DatabaseService {
     } catch (error) {
       console.error("Error tracking call:", error);
       // Don't throw - we don't want call tracking to break the main functionality
+    }
+  }
+
+  // Update call costs when call completes
+  static async updateCallCosts(
+    callControlId: string,
+    duration: number,
+    phoneNumber: string
+  ): Promise<void> {
+    try {
+      // Get destination country from phone number
+      const destinationCountry =
+        TelnyxCostCalculator.getCountryFromPhoneNumber(phoneNumber);
+
+      // Calculate costs for completed call
+      const costBreakdown = TelnyxCostCalculator.calculateCompletedCallCost(
+        duration,
+        destinationCountry
+      );
+
+      // Update the call record with costs
+      const { error } = await supabase
+        .from("calls")
+        .update({
+          voice_cost: costBreakdown.voiceCost,
+          sip_trunking_cost: costBreakdown.sipTrunkingCost,
+          total_cost: costBreakdown.totalCost,
+          currency: costBreakdown.currency,
+          destination_country: destinationCountry,
+          status: "completed", // Update status to completed
+        })
+        .eq("call_control_id", callControlId);
+
+      if (error) throw error;
+
+      // Also update user stats to include the new costs
+      await this.updateUserStatsWithCosts(callControlId, costBreakdown);
+    } catch (error) {
+      console.error("Error updating call costs:", error);
+      // Don't throw - we don't want cost updates to break the main functionality
+    }
+  }
+
+  // Update user stats with cost information
+  private static async updateUserStatsWithCosts(
+    callControlId: string,
+    costBreakdown: any
+  ): Promise<void> {
+    try {
+      // First get the user_id from the call
+      const { data: callData, error: callError } = await supabase
+        .from("calls")
+        .select("user_id")
+        .eq("call_control_id", callControlId)
+        .single();
+
+      if (callError) throw callError;
+
+      // Get current user stats to add to them
+      const { data: userData, error: userError } = await supabase
+        .from("users")
+        .select("total_voice_cost, total_sip_trunking_cost, total_cost")
+        .eq("id", callData.user_id)
+        .single();
+
+      if (userError) throw userError;
+
+      // Calculate new totals by adding current costs
+      const newTotalVoiceCost =
+        (userData?.total_voice_cost || 0) + costBreakdown.voiceCost;
+      const newTotalSipTrunkingCost =
+        (userData?.total_sip_trunking_cost || 0) +
+        costBreakdown.sipTrunkingCost;
+      const newTotalCost =
+        (userData?.total_cost || 0) + costBreakdown.totalCost;
+
+      // Update user stats with accumulated cost information
+      const { error: updateError } = await supabase
+        .from("users")
+        .update({
+          total_voice_cost: newTotalVoiceCost,
+          total_sip_trunking_cost: newTotalSipTrunkingCost,
+          total_cost: newTotalCost,
+          last_active: new Date().toISOString(),
+        })
+        .eq("id", callData.user_id);
+
+      if (updateError) throw updateError;
+    } catch (error) {
+      console.error("Error updating user stats with costs:", error);
+      // Don't throw - we don't want cost updates to break the main functionality
     }
   }
 

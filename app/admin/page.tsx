@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { DatabaseService, UserStats } from "@/lib/database";
+import { TelnyxCostCalculator } from "@/lib/costCalculator";
 
 interface CallStats {
   total_calls: number;
@@ -269,6 +270,39 @@ export default function AdminPage() {
                 </div>
               </div>
             </div>
+
+            {/* Total Cost Summary */}
+            <div className="bg-white rounded-lg shadow p-6 col-span-1 md:col-span-2 lg:col-span-1">
+              <div className="flex items-center">
+                <div className="p-2 bg-green-100 rounded-lg">
+                  <svg
+                    className="w-6 h-6 text-green-600"
+                    fill="currentColor"
+                    viewBox="0 0 20 20"
+                  >
+                    <path
+                      fillRule="evenodd"
+                      d="M4 4a2 2 0 00-2 2v4a2 2 0 002 2V6h10a2 2 0 00-2-2H4zm2 6a2 2 0 012-2h8a2 2 0 012 2v4a2 2 0 01-2 2H8a2 2 0 01-2-2v-4zm6 4a2 2 0 100-4 2 2 0 000 4z"
+                      clipRule="evenodd"
+                    />
+                  </svg>
+                </div>
+                <div className="ml-4">
+                  <p className="text-sm font-medium text-gray-600">
+                    Total Cost
+                  </p>
+                  <p className="text-2xl font-semibold text-green-600">
+                    {userStats
+                      .reduce(
+                        (total, user) => total + (user.total_cost || 0),
+                        0
+                      )
+                      .toFixed(4)}
+                  </p>
+                  <p className="text-xs text-gray-500">USD</p>
+                </div>
+              </div>
+            </div>
           </div>
         )}
 
@@ -300,6 +334,9 @@ export default function AdminPage() {
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Success Rate
+                  </th>
+                  <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
+                    Total Cost
                   </th>
                   <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
                     Last Active
@@ -348,6 +385,13 @@ export default function AdminPage() {
                             {successRate}%
                           </span>
                         </div>
+                      </td>
+                      <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
+                        <span className="font-medium text-green-600">
+                          {TelnyxCostCalculator.formatCost(
+                            user.total_cost || 0
+                          )}
+                        </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
                         {new Date(user.last_active).toLocaleDateString()}

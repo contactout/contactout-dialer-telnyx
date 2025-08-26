@@ -132,6 +132,12 @@ const CallHistory: React.FC<CallHistoryProps> = ({
               <div className="text-sm font-medium text-gray-900 truncate">
                 {call.phoneNumber}
               </div>
+              {/* Duration Information Only */}
+              {call.duration && (
+                <div className="text-xs text-gray-500 mt-1">
+                  Duration: {Math.round((call.duration / 60) * 100) / 100} min
+                </div>
+              )}
             </div>
 
             {/* Actions */}

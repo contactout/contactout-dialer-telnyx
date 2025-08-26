@@ -22,7 +22,8 @@ interface UseTelnyxWebRTCReturn {
   debugAudioSetup: () => void;
   onCallStatusChange?: (
     status: "completed" | "failed" | "missed" | "incoming",
-    phoneNumber?: string
+    phoneNumber?: string,
+    duration?: number
   ) => void;
 }
 
@@ -31,7 +32,8 @@ export const useTelnyxWebRTC = (
   userId?: string,
   onCallStatusChange?: (
     status: "completed" | "failed" | "missed" | "incoming",
-    phoneNumber?: string
+    phoneNumber?: string,
+    duration?: number
   ) => void
 ) => {
   const [client, setClient] = useState<any>(null);
@@ -42,6 +44,7 @@ export const useTelnyxWebRTC = (
   const [error, setError] = useState<string | null>(null);
   const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState(false);
   const [callControlId, setCallControlId] = useState<string | null>(null);
+  const [callStartTime, setCallStartTime] = useState<number | null>(null);
 
   // Refs for audio elements
   const localAudioRef = useRef<HTMLAudioElement | null>(null);
@@ -171,7 +174,8 @@ export const useTelnyxWebRTC = (
                 if (onCallStatusChange) {
                   onCallStatusChange(
                     "completed",
-                    call.phoneNumber || config.phoneNumber
+                    call.phoneNumber || config.phoneNumber,
+                    undefined // Duration not available yet
                   );
                 }
                 break;
@@ -190,7 +194,8 @@ export const useTelnyxWebRTC = (
                 if (onCallStatusChange) {
                   onCallStatusChange(
                     "completed",
-                    call.phoneNumber || config.phoneNumber
+                    call.phoneNumber || config.phoneNumber,
+                    undefined // Duration not available for this event
                   );
                 }
                 break;
@@ -221,7 +226,8 @@ export const useTelnyxWebRTC = (
                   if (onCallStatusChange) {
                     onCallStatusChange(
                       "failed",
-                      call.phoneNumber || config.phoneNumber
+                      call.phoneNumber || config.phoneNumber,
+                      undefined // Duration not available for failed calls
                     );
                   }
                 }
@@ -233,34 +239,44 @@ export const useTelnyxWebRTC = (
         // Add specific event listeners for better call state handling
         telnyxClient.on("call.hangup", (call: any) => {
           console.log("Call hangup event received");
+          const duration = callStartTime
+            ? Math.floor((Date.now() - callStartTime) / 1000)
+            : undefined;
           setIsCallActive(false);
           setIsConnecting(false);
           setCurrentCall(null);
           setCallControlId(null);
+          setCallStartTime(null);
           setError(null);
           cleanupAudio();
           stopCallStreaming();
           if (onCallStatusChange) {
             onCallStatusChange(
               "completed",
-              call.phoneNumber || config.phoneNumber
+              call.phoneNumber || config.phoneNumber,
+              duration
             );
           }
         });
 
         telnyxClient.on("call.destroy", (call: any) => {
           console.log("Call destroy event received");
+          const duration = callStartTime
+            ? Math.floor((Date.now() - callStartTime) / 1000)
+            : undefined;
           setIsCallActive(false);
           setIsConnecting(false);
           setCurrentCall(null);
           setCallControlId(null);
+          setCallStartTime(null);
           setError(null);
           cleanupAudio();
           stopCallStreaming();
           if (onCallStatusChange) {
             onCallStatusChange(
               "completed",
-              call.phoneNumber || config.phoneNumber
+              call.phoneNumber || config.phoneNumber,
+              duration
             );
           }
         });
@@ -677,6 +693,7 @@ export const useTelnyxWebRTC = (
                 setIsCallActive(true);
                 setCurrentCall(call);
                 setError(null);
+                setCallStartTime(Date.now()); // Start tracking call duration
 
                 // Extract call control ID if not already set
                 if (call.call_control_id && !callControlId) {
@@ -703,12 +720,25 @@ export const useTelnyxWebRTC = (
             try {
               eventHandler("ended", () => {
                 console.log("Call ended");
+                const duration = callStartTime
+                  ? Math.floor((Date.now() - callStartTime) / 1000)
+                  : undefined;
                 setIsCallActive(false);
                 setIsConnecting(false);
                 setCurrentCall(null);
                 setCallControlId(null);
+                setCallStartTime(null);
                 cleanupAudio();
                 stopCallStreaming();
+
+                // Notify parent of call end with duration
+                if (onCallStatusChange) {
+                  onCallStatusChange(
+                    "completed",
+                    call.phoneNumber || config.phoneNumber,
+                    duration
+                  );
+                }
               });
             } catch (err) {
               console.error("Failed to set up ended event handler:", err);
@@ -852,16 +882,38 @@ export const useTelnyxWebRTC = (
       }
     }
 
+    // Calculate call duration before cleanup
+    const duration = callStartTime
+      ? Math.floor((Date.now() - callStartTime) / 1000)
+      : undefined;
+
     // Always clean up our local state and resources
     console.log("Cleaning up call resources");
     setIsCallActive(false);
     setIsConnecting(false);
     setCurrentCall(null);
     setCallControlId(null);
+    setCallStartTime(null);
     setError(null); // Clear any errors
     cleanupAudio();
     stopCallStreaming();
-  }, [currentCall, cleanupAudio, stopCallStreaming]);
+
+    // Notify parent of call end with duration
+    if (onCallStatusChange) {
+      onCallStatusChange(
+        "completed",
+        currentCall?.phoneNumber || config.phoneNumber,
+        duration
+      );
+    }
+  }, [
+    currentCall,
+    callStartTime,
+    config.phoneNumber,
+    onCallStatusChange,
+    cleanupAudio,
+    stopCallStreaming,
+  ]);
 
   // Debug function to check audio setup
   const debugAudioSetup = useCallback(() => {

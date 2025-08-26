@@ -4,6 +4,7 @@ import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { DatabaseService } from "@/lib/database";
 import { supabase } from "@/lib/supabase";
+import CallCostHistory from "@/components/CallCostHistory";
 
 interface User {
   id: string;
@@ -23,6 +24,7 @@ export default function AdminManagePage() {
   const [isLoading, setIsLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [successMessage, setSuccessMessage] = useState<string | null>(null);
+  const [showCallCostHistory, setShowCallCostHistory] = useState(false);
 
   useEffect(() => {
     const checkAdminAndFetch = async () => {
@@ -150,6 +152,12 @@ export default function AdminManagePage() {
               </p>
             </div>
             <div className="flex items-center space-x-4">
+              <button
+                onClick={() => setShowCallCostHistory(true)}
+                className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 transition-colors"
+              >
+                Call Cost History
+              </button>
               <button
                 onClick={fetchUsers}
                 className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors"
@@ -289,6 +297,12 @@ export default function AdminManagePage() {
           )}
         </div>
       </div>
+
+      {/* Call Cost History Modal */}
+      <CallCostHistory
+        isVisible={showCallCostHistory}
+        onClose={() => setShowCallCostHistory(false)}
+      />
     </div>
   );
 }

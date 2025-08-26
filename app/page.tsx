@@ -53,12 +53,16 @@ export default function Home() {
     hangupCall,
     sendDTMF,
     debugAudioSetup,
-  } = useTelnyxWebRTC(telnyxConfig, user?.id, (status, phoneNumber) => {
-    // Update call history with the correct status
-    if (phoneNumber) {
-      addCall(phoneNumber, status);
+  } = useTelnyxWebRTC(
+    telnyxConfig,
+    user?.id,
+    (status, phoneNumber, duration) => {
+      // Update call history with the correct status and duration
+      if (phoneNumber) {
+        addCall(phoneNumber, status, duration);
+      }
     }
-  });
+  );
 
   // Check admin status when user changes
   useEffect(() => {

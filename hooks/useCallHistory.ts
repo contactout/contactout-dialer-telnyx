@@ -1,9 +1,16 @@
 import { useState, useEffect, useCallback } from "react";
+import { TelnyxCostCalculator } from "@/lib/costCalculator";
 
 export interface CallRecord {
   phoneNumber: string;
   timestamp: number;
   status: "completed" | "failed" | "missed" | "incoming";
+  duration?: number;
+  voiceCost?: number;
+  sipTrunkingCost?: number;
+  totalCost?: number;
+  currency?: string;
+  destinationCountry?: string;
 }
 
 const STORAGE_KEY = "call_history";
@@ -36,11 +43,40 @@ export const useCallHistory = () => {
 
   // Add a new call to history
   const addCall = useCallback(
-    (phoneNumber: string, status: CallRecord["status"]) => {
+    (phoneNumber: string, status: CallRecord["status"], duration?: number) => {
+      // Calculate costs based on status and duration
+      let voiceCost = 0;
+      let sipTrunkingCost = 0;
+      let totalCost = 0;
+      const destinationCountry =
+        TelnyxCostCalculator.getCountryFromPhoneNumber(phoneNumber);
+
+      if (status === "completed" && duration) {
+        const costBreakdown = TelnyxCostCalculator.calculateCompletedCallCost(
+          duration,
+          destinationCountry
+        );
+        voiceCost = costBreakdown.voiceCost;
+        sipTrunkingCost = costBreakdown.sipTrunkingCost;
+        totalCost = costBreakdown.totalCost;
+      } else if (status === "failed" || status === "missed") {
+        const costBreakdown =
+          TelnyxCostCalculator.calculateFailedCallCost(destinationCountry);
+        voiceCost = costBreakdown.voiceCost;
+        sipTrunkingCost = costBreakdown.sipTrunkingCost;
+        totalCost = costBreakdown.totalCost;
+      }
+
       const newCall: CallRecord = {
         phoneNumber,
         timestamp: Date.now(),
         status,
+        duration,
+        voiceCost,
+        sipTrunkingCost,
+        totalCost,
+        currency: "USD",
+        destinationCountry,
       };
 
       setCallHistory((prev) => {
