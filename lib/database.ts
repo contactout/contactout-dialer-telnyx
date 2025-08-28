@@ -40,18 +40,53 @@ export class DatabaseService {
     try {
       const now = new Date().toISOString();
 
+      // First, check if user already exists and has a role set
+      const { data: existingUser, error: fetchError } = await supabase
+        .from("users")
+        .select("role, email, full_name")
+        .eq("id", userData.id)
+        .single();
+
+      // Determine the role to use
+      let role = "user"; // default role
+
+      if (existingUser && existingUser.role) {
+        // User exists and has a role - preserve it
+        role = existingUser.role;
+      } else if (userData.email?.includes("admin")) {
+        // New user with admin email - set as admin
+        role = "admin";
+      }
+
+      // Check if we actually need to update anything
+      if (
+        existingUser &&
+        existingUser.role === role &&
+        existingUser.email === userData.email &&
+        existingUser.full_name === userData.full_name
+      ) {
+        // No changes needed, just update last_active
+        const { error: updateError } = await supabase
+          .from("users")
+          .update({ last_active: now })
+          .eq("id", userData.id);
+
+        if (updateError) throw updateError;
+        return; // Exit early, no need for full upsert
+      }
+
       // Try to insert new user, if conflict then update
       const { error } = await supabase.from("users").upsert(
         {
           id: userData.id,
           email: userData.email,
           full_name: userData.full_name,
-          total_calls: 0,
-          successful_calls: 0,
-          failed_calls: 0,
+          total_calls: existingUser?.total_calls || 0,
+          successful_calls: existingUser?.successful_calls || 0,
+          failed_calls: existingUser?.failed_calls || 0,
           last_active: now,
-          created_at: now,
-          role: userData.email?.includes("admin") ? "admin" : "user",
+          created_at: existingUser?.created_at || now,
+          role: role, // Use the determined role
           updated_at: now,
         },
         {
@@ -108,15 +143,29 @@ export class DatabaseService {
     }
 
     try {
-      // Check our users table first for role
+      // Use a direct query with proper error handling to avoid infinite recursion
       const { data: userData, error: userError } = await supabase
         .from("users")
-        .select("role")
+        .select("role, email")
         .eq("id", userId)
         .single();
 
-      if (!userError && userData?.role === "admin") {
-        // Cache successful result
+      if (userError) {
+        console.warn(
+          "Database query failed for admin check:",
+          userError.message
+        );
+        // Cache failed result to prevent repeated queries
+        this.adminCheckCache.set(cacheKey, {
+          result: false,
+          timestamp: now,
+          failed: true,
+        });
+        return false;
+      }
+
+      // Check if user has admin role
+      if (userData?.role === "admin") {
         this.adminCheckCache.set(cacheKey, {
           result: true,
           timestamp: now,
@@ -125,37 +174,9 @@ export class DatabaseService {
         return true;
       }
 
-      // If role check failed or user doesn't have admin role, check email as fallback
-      if (userError) {
-        console.warn(
-          "Role check failed, trying email fallback:",
-          userError.message
-        );
-      }
+      // Fallback: check if email contains 'admin' (for backward compatibility)
+      const result = userData?.email?.includes("admin") || false;
 
-      // Fallback: check if email contains 'admin'
-      const { data: user, error } = await supabase
-        .from("users")
-        .select("email")
-        .eq("id", userId)
-        .single();
-
-      if (error) {
-        console.warn(
-          "Database query failed, falling back to email check:",
-          error
-        );
-        // Cache failed result to prevent repeated queries
-        this.adminCheckCache.set(cacheKey, {
-          result: false,
-          timestamp: now,
-          failed: true,
-        });
-        // If database is unavailable, fall back to email-based admin check
-        return false;
-      }
-
-      const result = user?.email?.includes("admin") || false;
       // Cache successful result
       this.adminCheckCache.set(cacheKey, {
         result,

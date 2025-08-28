@@ -157,9 +157,7 @@ const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
               </div>
             </button>
 
-            {(isAdmin ||
-              window.location.hostname.includes("localhost") ||
-              window.location.hostname.includes("127.0.0.1")) && (
+            {isAdmin && (
               <button
                 onClick={() => {
                   window.location.href = "/admin";

@@ -1,4 +1,4 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import { TelnyxCostCalculator } from "@/lib/costCalculator";
 
 export interface CallRecord {
@@ -18,6 +18,7 @@ const MAX_HISTORY_SIZE = 10; // Keep last 10 calls
 
 export const useCallHistory = () => {
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
+  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
 
   // Load call history from localStorage on mount
   useEffect(() => {
@@ -32,13 +33,34 @@ export const useCallHistory = () => {
     }
   }, []);
 
-  // Save call history to localStorage whenever it changes
+  // Save call history to localStorage with debouncing to prevent excessive writes
   useEffect(() => {
-    try {
-      localStorage.setItem(STORAGE_KEY, JSON.stringify(callHistory));
-    } catch (error) {
-      console.error("Failed to save call history to localStorage:", error);
+    // Clear any existing timeout
+    if (saveTimeoutRef.current) {
+      clearTimeout(saveTimeoutRef.current);
     }
+
+    // Set a new timeout to save after 500ms of no changes
+    saveTimeoutRef.current = setTimeout(() => {
+      try {
+        // Only save if there's actual call history to save
+        if (callHistory.length > 0) {
+          localStorage.setItem(STORAGE_KEY, JSON.stringify(callHistory));
+        } else {
+          // If no call history, remove the item from localStorage
+          localStorage.removeItem(STORAGE_KEY);
+        }
+      } catch (error) {
+        console.error("Failed to save call history to localStorage:", error);
+      }
+    }, 500);
+
+    // Cleanup timeout on unmount
+    return () => {
+      if (saveTimeoutRef.current) {
+        clearTimeout(saveTimeoutRef.current);
+      }
+    };
   }, [callHistory]);
 
   // Add a new call to history
@@ -89,7 +111,9 @@ export const useCallHistory = () => {
         const updated = [newCall, ...filtered];
 
         // Keep only the last MAX_HISTORY_SIZE calls
-        return updated.slice(0, MAX_HISTORY_SIZE);
+        const final = updated.slice(0, MAX_HISTORY_SIZE);
+
+        return final;
       });
     },
     []

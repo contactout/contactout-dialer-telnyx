@@ -50,8 +50,6 @@ export const useDTMFTones = () => {
 
   const playTone = useCallback(
     (digit: string) => {
-      console.log("Attempting to play DTMF tone for digit:", digit);
-
       if (!DTMF_FREQUENCIES[digit]) {
         console.warn("Invalid digit for DTMF tone:", digit);
         return;

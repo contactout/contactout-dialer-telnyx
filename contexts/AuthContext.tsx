@@ -82,7 +82,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setLoading(false);
         setAuthError("Loading timeout. Please refresh the page or try again.");
       }
-    }, 10000); // 10 second timeout
+    }, 3000); // 3 second timeout for faster loading
 
     // Set up activity tracking event listeners
     const activityEvents = [

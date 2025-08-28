@@ -9,6 +9,9 @@ interface DialPadProps {
   onClear: () => void;
   isCallActive: boolean;
   isConnecting: boolean;
+  isInitializing?: boolean;
+  isConnected?: boolean;
+  hasMicrophoneAccess?: boolean;
 }
 
 const DialPad: React.FC<DialPadProps> = ({
@@ -19,6 +22,9 @@ const DialPad: React.FC<DialPadProps> = ({
   onClear,
   isCallActive,
   isConnecting,
+  isInitializing = false,
+  isConnected = false,
+  hasMicrophoneAccess = false,
 }) => {
   const { playTone, volume, enabled, initializeAudioContext } = useDTMFTones();
 
@@ -31,6 +37,36 @@ const DialPad: React.FC<DialPadProps> = ({
 
     // Handle digit press
     onDigitPress(digit);
+  };
+
+  // Check if call button should be disabled
+  const isCallDisabled =
+    !phoneNumber ||
+    isConnecting ||
+    isInitializing ||
+    !isConnected ||
+    !hasMicrophoneAccess;
+
+  // Get call button status text
+  const getCallButtonText = () => {
+    if (isInitializing) return "Initializing...";
+    if (!isConnected) return "Not Connected";
+    if (!hasMicrophoneAccess) return "No Microphone";
+    if (!phoneNumber) return "Enter Number";
+    if (isConnecting) return "Connecting...";
+    return "Call";
+  };
+
+  // Get call button tooltip
+  const getCallButtonTooltip = () => {
+    if (isInitializing) return "Telnyx is initializing...";
+    if (!isConnected)
+      return "Telnyx is not connected. Please check your credentials and network connection.";
+    if (!hasMicrophoneAccess)
+      return "Microphone access is required. Please allow microphone permissions.";
+    if (!phoneNumber) return "Please enter a phone number to call.";
+    if (isConnecting) return "Call is in progress...";
+    return "Click to make a call";
   };
 
   const digits = [
@@ -71,12 +107,15 @@ const DialPad: React.FC<DialPadProps> = ({
         <div className="flex gap-4 justify-center">
           <button
             onClick={onCall}
-            disabled={!phoneNumber || isConnecting}
-            className="flex-1 max-w-[120px] bg-green-500 hover:bg-green-600 disabled:bg-gray-400 text-white font-semibold py-3 px-6 rounded-full transition-colors shadow-lg flex items-center justify-center"
+            disabled={isCallDisabled}
+            title={getCallButtonTooltip()}
+            className={`flex-1 max-w-[120px] font-semibold py-3 px-6 rounded-full transition-colors shadow-lg flex items-center justify-center ${
+              isCallDisabled
+                ? "bg-gray-400 cursor-not-allowed text-gray-600"
+                : "bg-green-500 hover:bg-green-600 text-white"
+            }`}
           >
-            <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
-              <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
-            </svg>
+            {getCallButtonText()}
           </button>
           {phoneNumber && (
             <button

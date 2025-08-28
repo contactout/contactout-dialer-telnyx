@@ -2,7 +2,10 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { TelnyxRTC } from "@telnyx/webrtc";
 import { DatabaseService } from "@/lib/database";
 
-// State machine for call states
+// ============================================================================
+// TYPES AND INTERFACES
+// ============================================================================
+
 type CallState =
   | "idle"
   | "connecting"
@@ -14,6 +17,8 @@ type CallState =
   | "failed"
   | "error";
 
+type NetworkQuality = "excellent" | "good" | "fair" | "poor";
+
 interface TelnyxConfig {
   apiKey: string;
   sipUsername: string;
@@ -21,24 +26,88 @@ interface TelnyxConfig {
   phoneNumber: string;
 }
 
+interface CallRecord {
+  user_id: string;
+  phone_number: string;
+  status: "completed" | "failed" | "missed" | "incoming";
+  call_control_id?: string;
+  duration?: number;
+}
+
 interface UseTelnyxWebRTCReturn {
+  // Connection state
   isConnected: boolean;
+  isInitializing: boolean;
+  isReconnecting: boolean;
+
+  // Call state
   isCallActive: boolean;
   isConnecting: boolean;
-  error: string | null;
-  hasMicrophoneAccess: boolean;
-  callControlId: string | null;
   callState: CallState;
+  callControlId: string | null;
+
+  // Audio state
+  hasMicrophoneAccess: boolean;
+  networkQuality: NetworkQuality;
+
+  // Error handling
+  error: string | null;
+
+  // Actions
   makeCall: (phoneNumber: string) => Promise<void>;
   hangupCall: () => void;
   sendDTMF: (digit: string) => void;
+  retryCall: (phoneNumber: string, maxRetries?: number) => Promise<void>;
+
+  // Utility functions
+  clearError: () => void;
+  forceResetCallState: () => void;
   debugAudioSetup: () => void;
-  onCallStatusChange?: (
-    status: "completed" | "failed" | "missed" | "incoming",
-    phoneNumber?: string,
-    duration?: number
-  ) => void;
 }
+
+// ============================================================================
+// UTILITY CLASSES
+// ============================================================================
+
+class TimeoutManager {
+  private timeouts = new Set<NodeJS.Timeout>();
+  private intervals = new Set<NodeJS.Timeout>();
+
+  addTimeout(timeout: NodeJS.Timeout) {
+    this.timeouts.add(timeout);
+    return timeout;
+  }
+
+  addInterval(interval: NodeJS.Timeout) {
+    this.intervals.add(interval);
+    return interval;
+  }
+
+  clearAll() {
+    this.timeouts.forEach(clearTimeout);
+    this.intervals.forEach(clearInterval);
+    this.timeouts.clear();
+    this.intervals.clear();
+  }
+
+  clearTimeout(timeout: NodeJS.Timeout) {
+    if (this.timeouts.has(timeout)) {
+      clearTimeout(timeout);
+      this.timeouts.delete(timeout);
+    }
+  }
+
+  clearInterval(interval: NodeJS.Timeout) {
+    if (this.intervals.has(interval)) {
+      clearInterval(interval);
+      this.intervals.delete(interval);
+    }
+  }
+}
+
+// ============================================================================
+// MAIN HOOK
+// ============================================================================
 
 export const useTelnyxWebRTC = (
   config: TelnyxConfig,
@@ -49,842 +118,108 @@ export const useTelnyxWebRTC = (
     duration?: number
   ) => void
 ) => {
+  // ============================================================================
+  // STATE MANAGEMENT
+  // ============================================================================
+
+  // Client state
   const [client, setClient] = useState<any>(null);
   const [isConnected, setIsConnected] = useState(false);
-  const [isCallActive, setIsCallActive] = useState(false);
-  const [isConnecting, setIsConnecting] = useState(false);
-  const [currentCall, setCurrentCall] = useState<any>(null);
-  const [error, setError] = useState<string | null>(null);
-  const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState(false);
-  const [callControlId, setCallControlId] = useState<string | null>(null);
-  const [callStartTime, setCallStartTime] = useState<number | null>(null);
-  const [reconnectionAttempts, setReconnectionAttempts] = useState(0);
-  const [networkQuality, setNetworkQuality] = useState<
-    "excellent" | "good" | "fair" | "poor"
-  >("good");
+  const [isInitializing, setIsInitializing] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
 
-  // Call state management
+  // Call state
+  const [currentCall, setCurrentCall] = useState<any>(null);
+  const [isCallActive, setIsCallActive] = useState(false);
+  const [isConnecting, setIsConnecting] = useState(false);
   const [callState, setCallState] = useState<CallState>("idle");
+  const [callControlId, setCallControlId] = useState<string | null>(null);
+  const [callStartTime, setCallStartTime] = useState<number | null>(null);
 
-  // Timeout refs to prevent race conditions
-  const callTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const tryingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
-  const statusCheckRef = useRef<NodeJS.Timeout | null>(null);
+  // Audio state
+  const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState(false);
+  const [networkQuality, setNetworkQuality] = useState<NetworkQuality>("good");
 
-  // Refs for audio elements
-  const localAudioRef = useRef<HTMLAudioElement | null>(null);
-  const remoteAudioRef = useRef<HTMLAudioElement | null>(null);
+  // Error and reconnection state
+  const [error, setError] = useState<string | null>(null);
+  const [reconnectionAttempts, setReconnectionAttempts] = useState(0);
+
+  // ============================================================================
+  // REFS
+  // ============================================================================
+
+  const timeoutManager = useRef(new TimeoutManager());
   const localStreamRef = useRef<MediaStream | null>(null);
-  const websocketRef = useRef<WebSocket | null>(null);
-
-  // Refs for audio context and gain node for fallback
   const audioContextRef = useRef<AudioContext | null>(null);
+  const previousUserIdRef = useRef<string | null>(null);
   const gainNodeRef = useRef<GainNode | null>(null);
 
-  useEffect(() => {
-    if (
-      !config.apiKey ||
-      !config.sipUsername ||
-      !config.sipPassword ||
-      !config.phoneNumber
-    ) {
-      setError("Missing Telnyx credentials");
-      return;
-    }
+  // Initialization tracking
+  const initializingRef = useRef<boolean>(false);
+  const initializedRef = useRef<boolean>(false);
+  const configRef = useRef<TelnyxConfig | null>(null);
 
-    const initializeClient = async () => {
-      try {
-        // Check if TelnyxRTC is available
-        if (typeof TelnyxRTC === "undefined") {
-          setError("Telnyx WebRTC SDK not loaded");
-          return;
-        }
+  // ============================================================================
+  // CONFIG MANAGEMENT
+  // ============================================================================
 
-        // Get microphone access first
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-              sampleRate: 48000,
-              channelCount: 1,
-            },
-            video: false,
-          });
-          localStreamRef.current = stream;
-          setHasMicrophoneAccess(true);
-          console.log("Microphone access granted");
-        } catch (micError) {
-          console.error("Failed to get microphone access:", micError);
-          setError("Microphone access required for calls");
-          return;
-        }
+  // Don't set configRef.current here - it should only be set after successful initialization
+  // This prevents the config change detection from thinking nothing has changed
 
-        const telnyxClient = new TelnyxRTC({
-          login_token: config.apiKey,
-          login: config.sipUsername,
-          password: config.sipPassword,
-        });
+  // ============================================================================
+  // CLEANUP FUNCTIONS
+  // ============================================================================
 
-        // Debug: Log available methods on the client
-        console.log("Telnyx client created:", telnyxClient);
-        console.log(
-          "Available methods:",
-          Object.getOwnPropertyNames(Object.getPrototypeOf(telnyxClient))
-        );
-        console.log(
-          "Has newCall method:",
-          typeof telnyxClient.newCall === "function"
-        );
-        console.log("Has on method:", typeof telnyxClient.on === "function");
+  const cleanupAll = useCallback(() => {
+    timeoutManager.current.clearAll();
 
-        // Check for alternative method names
-        console.log(
-          "Has call method:",
-          typeof (telnyxClient as any).call === "function"
-        );
-        console.log(
-          "Has createCall method:",
-          typeof (telnyxClient as any).createCall === "function"
-        );
-        console.log(
-          "Has addEventListener method:",
-          typeof (telnyxClient as any).addEventListener === "function"
-        );
-
-        // Set up event listeners
-        telnyxClient.on("telnyx.ready", () => {
-          console.log("Telnyx client ready");
-          setIsConnected(true);
-          setError(null);
-        });
-
-        telnyxClient.on("telnyx.error", (error: any) => {
-          console.error("Telnyx client error:", error);
-          setError(`Telnyx error: ${error.message || "Unknown error"}`);
-          setIsConnected(false);
-        });
-
-        telnyxClient.on("telnyx.close", () => {
-          console.log("Telnyx client closed");
-          setIsConnected(false);
-          setError("Connection closed");
-        });
-
-        // Handle call events
-        telnyxClient.on("call", (call: any) => {
-          console.log("Call event received:", call);
-          if (call.state) {
-            console.log("Call state:", call.state);
-            switch (call.state) {
-              case "ringing":
-                transitionCallState("ringing", call);
-                break;
-              case "answered":
-                transitionCallState("answered", call);
-                // Track successful call completion if userId is provided
-                if (userId) {
-                  DatabaseService.trackCall({
-                    user_id: userId,
-                    phone_number: call.phoneNumber || config.phoneNumber,
-                    status: "completed",
-                    call_control_id: call.call_control_id,
-                  });
-                }
-
-                // Notify parent of successful call
-                if (onCallStatusChange) {
-                  onCallStatusChange(
-                    "completed",
-                    call.phoneNumber || config.phoneNumber,
-                    undefined // Duration not available yet
-                  );
-                }
-                break;
-              case "ended":
-              case "hangup":
-              case "destroy":
-                console.log("Call ended:", call.state);
-                transitionCallState("ended", call);
-                // Notify parent of call end
-                if (onCallStatusChange) {
-                  onCallStatusChange(
-                    "completed",
-                    call.phoneNumber || config.phoneNumber,
-                    undefined // Duration not available for this event
-                  );
-                }
-                break;
-              default:
-                console.log("Unknown call state:", call.state);
-                if (
-                  call.state.includes("fail") ||
-                  call.state.includes("error")
-                ) {
-                  transitionCallState("failed", call);
-                  setError(`Call failed: ${call.state}`);
-                  // Track failed call if userId is provided
-                  if (userId) {
-                    DatabaseService.trackCall({
-                      user_id: userId,
-                      phone_number: call.phoneNumber || config.phoneNumber,
-                      status: "failed",
-                      call_control_id: call.call_control_id,
-                    });
-                  }
-
-                  // Notify parent of failed call
-                  if (onCallStatusChange) {
-                    onCallStatusChange(
-                      "failed",
-                      call.phoneNumber || config.phoneNumber,
-                      undefined // Duration not available for failed calls
-                    );
-                  }
-                }
-                break;
-            }
-          }
-        });
-
-        // Add specific event listeners for better call state handling
-        telnyxClient.on("call.hangup", (call: any) => {
-          console.log("Call hangup event received");
-          const duration = callStartTime
-            ? Math.floor((Date.now() - callStartTime) / 1000)
-            : undefined;
-          transitionCallState("ended", call);
-          if (onCallStatusChange) {
-            onCallStatusChange(
-              "completed",
-              call.phoneNumber || config.phoneNumber,
-              duration
-            );
-          }
-        });
-
-        // Handle call failures (including invalid phone numbers)
-        telnyxClient.on("call.failed", (call: any) => {
-          console.log("Call failed event received:", call);
-          transitionCallState("failed", call);
-          setError("Call failed - Invalid phone number or connection error");
-
-          // Track failed call if userId is provided
-          if (userId) {
-            DatabaseService.trackCall({
-              user_id: userId,
-              phone_number: call.phoneNumber || config.phoneNumber,
-              status: "failed",
-              call_control_id: call.call_control_id,
-            });
-          }
-
-          // Notify parent of failed call
-          if (onCallStatusChange) {
-            onCallStatusChange(
-              "failed",
-              call.phoneNumber || config.phoneNumber,
-              undefined
-            );
-          }
-        });
-
-        // Handle call rejections
-        telnyxClient.on("call.rejected", (call: any) => {
-          console.log("Call rejected event received:", call);
-          transitionCallState("failed", call);
-          setError("Call rejected - Number may be invalid or unavailable");
-
-          // Track rejected call if userId is provided
-          if (userId) {
-            DatabaseService.trackCall({
-              user_id: userId,
-              phone_number: call.phoneNumber || config.phoneNumber,
-              status: "failed",
-              call_control_id: call.call_control_id,
-            });
-          }
-
-          // Notify parent of rejected call
-          if (onCallStatusChange) {
-            onCallStatusChange(
-              "failed",
-              call.phoneNumber || config.phoneNumber,
-              undefined
-            );
-          }
-        });
-
-        // Handle call errors
-        telnyxClient.on("call.error", (call: any, error: any) => {
-          console.log("Call error event received:", call, error);
-          transitionCallState("error", call);
-          setError(`Call error: ${error?.message || "Unknown error occurred"}`);
-
-          // Track failed call if userId is provided
-          if (userId) {
-            DatabaseService.trackCall({
-              user_id: userId,
-              phone_number: call.phoneNumber || config.phoneNumber,
-              status: "failed",
-              call_control_id: call.call_control_id,
-            });
-          }
-
-          // Notify parent of failed call
-          if (onCallStatusChange) {
-            onCallStatusChange(
-              "failed",
-              call.phoneNumber || config.phoneNumber,
-              undefined
-            );
-          }
-        });
-
-        telnyxClient.on("call.destroy", (call: any) => {
-          console.log("Call destroy event received");
-          const duration = callStartTime
-            ? Math.floor((Date.now() - callStartTime) / 1000)
-            : undefined;
-
-          // Check if call was destroyed due to an error or normal completion
-          if (call.state === "hangup" && callState === "connecting") {
-            // Call was hung up while connecting - likely invalid number or network issue
-            setError(
-              "Call failed - Phone number may be invalid or unavailable"
-            );
-            transitionCallState("failed", call);
-          } else if (call.state === "destroy" && callState === "connecting") {
-            // Call was destroyed while connecting - likely a connection issue
-            setError(
-              "Call connection failed - Please check your network connection"
-            );
-            transitionCallState("failed", call);
-          } else {
-            // Normal call completion
-            transitionCallState("ended", call);
-          }
-
-          if (onCallStatusChange) {
-            onCallStatusChange(
-              "completed",
-              call.phoneNumber || config.phoneNumber,
-              duration
-            );
-          }
-        });
-
-        // Network resilience and monitoring
-        telnyxClient.on("connection.lost", () => {
-          console.log("Connection lost - attempting to reconnect");
-          setIsConnected(false);
-          setError("Connection lost - attempting to reconnect...");
-          setIsReconnecting(true);
-
-          // Attempt reconnection with exponential backoff
-          attemptReconnection();
-        });
-
-        telnyxClient.on("connection.restored", () => {
-          console.log("Connection restored successfully");
-          setIsConnected(true);
-          setIsReconnecting(false);
-          setReconnectionAttempts(0);
-          setError(null);
-          setNetworkQuality("good");
-        });
-
-        telnyxClient.on("connection.failed", () => {
-          console.log("Reconnection failed");
-          setIsReconnecting(false);
-          setError(
-            "Failed to reconnect - please check your connection and try again"
-          );
-
-          // Reset reconnection attempts after a delay
-          setTimeout(() => {
-            setReconnectionAttempts(0);
-          }, 30000); // 30 seconds
-        });
-
-        // Network quality monitoring
-        telnyxClient.on("network.quality", (quality: any) => {
-          console.log("Network quality update:", quality);
-          if (quality && quality.score) {
-            const score = quality.score;
-            let newQuality: "excellent" | "good" | "fair" | "poor";
-
-            if (score >= 0.8) {
-              newQuality = "excellent";
-            } else if (score >= 0.6) {
-              newQuality = "good";
-            } else if (score >= 0.4) {
-              newQuality = "fair";
-            } else {
-              newQuality = "poor";
-            }
-
-            setNetworkQuality(newQuality);
-
-            // Show user notification for poor network quality
-            if (newQuality === "poor" || newQuality === "fair") {
-              console.warn(`Network quality degraded to ${newQuality}`);
-              if (isCallActive || isConnecting) {
-                setError(
-                  `Poor network detected (${newQuality}) - audio quality may be reduced`
-                );
-              }
-            } else if (newQuality === "excellent" || newQuality === "good") {
-              // Clear network-related errors when quality improves
-              if (error && error.includes("network")) {
-                setError(null);
-              }
-            }
-          }
-        });
-
-        setClient(telnyxClient);
-
-        // Connect to Telnyx
-        telnyxClient.connect();
-      } catch (err) {
-        console.error("Failed to initialize Telnyx client:", err);
-        setError("Failed to initialize WebRTC client");
-      }
-    };
-
-    initializeClient();
-
-    return () => {
-      // Clean up audio and streaming
-      cleanupAudio();
-      stopCallStreaming();
-
-      // Disconnect client
-      if (client) {
-        client.disconnect();
-      }
-    };
-  }, [
-    config.apiKey,
-    config.sipUsername,
-    config.sipPassword,
-    config.phoneNumber,
-  ]);
-
-  // Start call streaming using Telnyx Call Control API
-  const startCallStreaming = useCallback(async (callControlId: string) => {
-    try {
-      console.log("Starting call streaming for:", callControlId);
-
-      // Create WebSocket connection for streaming audio
-      // Note: This requires proper authentication headers which WebSocket doesn't support
-      // We'll use the Telnyx SDK's built-in audio handling instead
-      console.log(
-        "Using Telnyx SDK built-in audio streaming instead of WebSocket API"
-      );
-
-      // The Telnyx WebRTC SDK should handle audio streams automatically
-      // We just need to ensure our audio elements are properly connected
-    } catch (err) {
-      console.error("Failed to start call streaming:", err);
-      setError("Failed to start audio streaming");
-    }
-  }, []);
-
-  // Stop call streaming
-  const stopCallStreaming = useCallback(() => {
-    if (websocketRef.current) {
-      websocketRef.current.close();
-      websocketRef.current = null;
-    }
-  }, []);
-
-  // Handle incoming audio stream data
-  const handleAudioStreamData = useCallback((audioData: any) => {
-    try {
-      // Convert base64 audio data to audio buffer
-      if (audioData.encoding === "base64" && audioData.payload) {
-        // Create audio context and decode the audio data
-        const audioContext = new (window.AudioContext ||
-          window.webkitAudioContext)();
-
-        // Convert base64 to array buffer
-        const binaryString = atob(audioData.payload);
-        const bytes = new Uint8Array(binaryString.length);
-        for (let i = 0; i < binaryString.length; i++) {
-          bytes[i] = binaryString.charCodeAt(i);
-        }
-
-        // Decode audio data
-        audioContext.decodeAudioData(
-          bytes.buffer,
-          (buffer) => {
-            // Create audio source and connect to destination
-            const source = audioContext.createBufferSource();
-            source.buffer = buffer;
-            source.connect(audioContext.destination);
-            source.start(0);
-          },
-          (error) => {
-            console.error("Failed to decode audio data:", error);
-          }
-        );
-      }
-    } catch (err) {
-      console.error("Failed to handle audio stream data:", err);
-    }
-  }, []);
-
-  // Handle call answered and set up audio streams
-  const handleCallAnswered = useCallback((call: any) => {
-    try {
-      // Create audio elements if they don't exist
-      if (!localAudioRef.current) {
-        localAudioRef.current = document.createElement("audio");
-        localAudioRef.current.autoplay = true;
-        localAudioRef.current.muted = true; // Mute local audio to prevent feedback
-        document.body.appendChild(localAudioRef.current);
-      }
-
-      if (!remoteAudioRef.current) {
-        remoteAudioRef.current = document.createElement("audio");
-        remoteAudioRef.current.autoplay = true;
-        remoteAudioRef.current.volume = 1.0;
-        document.body.appendChild(remoteAudioRef.current);
-      }
-
-      // Set up local audio stream (microphone)
-      if (localStreamRef.current) {
-        localAudioRef.current.srcObject = localStreamRef.current;
-        console.log("Local audio stream set up");
-      }
-
-      // Set up remote audio stream from the call
-      if (call.remoteStream) {
-        remoteAudioRef.current.srcObject = call.remoteStream;
-        console.log("Remote audio stream set up");
-      } else if (call.getRemoteStream) {
-        // Some versions of Telnyx use getRemoteStream method
-        const remoteStream = call.getRemoteStream();
-        if (remoteStream) {
-          remoteAudioRef.current.srcObject = remoteStream;
-          console.log("Remote audio stream set up via getRemoteStream");
-        }
-      }
-
-      // Set up call event handlers for audio
-      call.on("remoteStream", (stream: MediaStream) => {
-        console.log("Remote stream received:", stream);
-        if (remoteAudioRef.current) {
-          remoteAudioRef.current.srcObject = stream;
-        }
-      });
-
-      call.on("localStream", (stream: MediaStream) => {
-        console.log("Local stream received:", stream);
-        if (localAudioRef.current) {
-          localAudioRef.current.srcObject = stream;
-        }
-      });
-    } catch (err) {
-      console.error("Failed to set up audio streams:", err);
-      setError("Failed to set up audio for call");
-    }
-  }, []);
-
-  // Set up audio streams for an active call
-  const setupCallAudioStreams = useCallback((call: any) => {
-    try {
-      console.log("Setting up audio streams for call:", call);
-
-      // Create audio elements if they don't exist
-      if (!localAudioRef.current) {
-        localAudioRef.current = document.createElement("audio");
-        localAudioRef.current.autoplay = true;
-        localAudioRef.current.muted = true; // Mute local audio to prevent feedback
-        document.body.appendChild(localAudioRef.current);
-      }
-
-      if (!remoteAudioRef.current) {
-        remoteAudioRef.current = document.createElement("audio");
-        remoteAudioRef.current.autoplay = true;
-        remoteAudioRef.current.volume = 1.0;
-        remoteAudioRef.current.muted = false; // Ensure remote audio is NOT muted
-        document.body.appendChild(remoteAudioRef.current);
-      }
-
-      // Set up local audio stream (microphone) - this is crucial for them to hear you
-      if (localStreamRef.current) {
-        localAudioRef.current.srcObject = localStreamRef.current;
-        console.log("Local audio stream (microphone) connected to call");
-
-        // Ensure the local stream is also connected to the call for outbound audio
-        if (call.addTrack && typeof call.addTrack === "function") {
-          const audioTrack = localStreamRef.current.getAudioTracks()[0];
-          if (audioTrack) {
-            call.addTrack(audioTrack);
-            console.log("Local audio track added to call for outbound audio");
-          }
-        }
-      }
-
-      // CRITICAL: Set up remote audio stream from the call - this is for you to hear them
-      // Try multiple approaches to get the remote stream
-      let remoteStreamFound = false;
-
-      // Method 1: Check if call already has remoteStream
-      if (call.remoteStream) {
-        console.log("Remote stream found on call object:", call.remoteStream);
-        remoteAudioRef.current.srcObject = call.remoteStream;
-        remoteStreamFound = true;
-      }
-
-      // Method 2: Try getRemoteStream method
-      if (
-        !remoteStreamFound &&
-        call.getRemoteStream &&
-        typeof call.getRemoteStream === "function"
-      ) {
-        try {
-          const remoteStream = call.getRemoteStream();
-          if (remoteStream) {
-            console.log(
-              "Remote stream obtained via getRemoteStream:",
-              remoteStream
-            );
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteStreamFound = true;
-          }
-        } catch (err) {
-          console.error("getRemoteStream failed:", err);
-        }
-      }
-
-      // Method 3: Check if call has a peerConnection with remote tracks
-      if (!remoteStreamFound && call.peerConnection) {
-        try {
-          const pc = call.peerConnection;
-          const remoteTracks = pc
-            .getReceivers()
-            .map((receiver: any) => receiver.track)
-            .filter((track: any) => track && track.kind === "audio");
-          if (remoteTracks.length > 0) {
-            const remoteStream = new MediaStream(remoteTracks);
-            console.log(
-              "Remote stream created from peer connection tracks:",
-              remoteStream
-            );
-            remoteAudioRef.current.srcObject = remoteStream;
-            remoteStreamFound = true;
-          }
-        } catch (err) {
-          console.error(
-            "Failed to get remote tracks from peer connection:",
-            err
-          );
-        }
-      }
-
-      if (!remoteStreamFound) {
-        console.warn(
-          "No remote stream found initially - will wait for remoteStream event"
-        );
-      }
-
-      // Set up call event handlers for dynamic audio streams
-      try {
-        call.on("remoteStream", (stream: MediaStream) => {
-          console.log("Remote stream received dynamically:", stream);
-          if (remoteAudioRef.current && stream) {
-            remoteAudioRef.current.srcObject = stream;
-            console.log("Remote audio stream connected for inbound audio");
-
-            // Test if audio is actually playing
-            remoteAudioRef.current
-              .play()
-              .then(() => {
-                console.log("Remote audio started playing successfully");
-              })
-              .catch((err) => {
-                console.error("Failed to play remote audio:", err);
-              });
-          }
-        });
-      } catch (err) {
-        console.error("Failed to set up remoteStream event handler:", err);
-      }
-
-      try {
-        call.on("localStream", (stream: MediaStream) => {
-          console.log("Local stream received dynamically:", stream);
-          if (localAudioRef.current) {
-            localAudioRef.current.srcObject = stream;
-          }
-        });
-      } catch (err) {
-        console.error("Failed to set up localStream event handler:", err);
-      }
-
-      // Additional event handlers for Telnyx specific events
-      try {
-        call.on("track", (event: any) => {
-          console.log("Track event received:", event);
-          if (
-            event.track &&
-            event.track.kind === "audio" &&
-            event.track.direction === "recvonly"
-          ) {
-            console.log("Remote audio track received:", event.track);
-            const remoteStream = new MediaStream([event.track]);
-            if (remoteAudioRef.current) {
-              remoteAudioRef.current.srcObject = remoteStream;
-              console.log("Remote audio track connected to audio element");
-            }
-          }
-        });
-      } catch (err) {
-        console.error("Failed to set up track event handler:", err);
-      }
-    } catch (err) {
-      console.error("Failed to set up call audio streams:", err);
-      setError("Failed to set up audio streams for call");
-    }
-  }, []);
-
-  // Clean up audio elements and streams
-  const cleanupAudio = useCallback(() => {
-    if (localAudioRef.current) {
-      localAudioRef.current.srcObject = null;
-      localAudioRef.current.remove();
-      localAudioRef.current = null;
-    }
-    if (remoteAudioRef.current) {
-      remoteAudioRef.current.srcObject = null;
-      remoteAudioRef.current.remove();
-      remoteAudioRef.current = null;
-    }
     if (localStreamRef.current) {
       localStreamRef.current.getTracks().forEach((track) => track.stop());
       localStreamRef.current = null;
     }
+
+    if (audioContextRef.current) {
+      audioContextRef.current.close();
+      audioContextRef.current = null;
+    }
+
+    // Only reset initializing flag, not the initialized flag
+    // This prevents re-initialization loops
+    initializingRef.current = false;
+    // Don't reset initializedRef.current here
+    // Don't reset configRef.current here
   }, []);
 
-  // Clean up all timeouts and intervals
-  const cleanupTimeouts = useCallback(() => {
-    if (callTimeoutRef.current) {
-      clearTimeout(callTimeoutRef.current);
-      callTimeoutRef.current = null;
-    }
-    if (tryingTimeoutRef.current) {
-      clearTimeout(tryingTimeoutRef.current);
-      tryingTimeoutRef.current = null;
-    }
-    if (statusCheckRef.current) {
-      clearInterval(statusCheckRef.current);
-      statusCheckRef.current = null;
-    }
-  }, []);
+  // ============================================================================
+  // CALL STATE MANAGEMENT
+  // ============================================================================
 
-  // Centralized error handling function
-  const handleError = useCallback(
-    (errorType: string, error: any, call?: any) => {
-      console.error(`${errorType}:`, error);
-
-      let errorMessage = "An unexpected error occurred";
-
-      switch (errorType) {
-        case "connection":
-          errorMessage =
-            "Connection failed - please check your internet connection";
-          break;
-        case "microphone":
-          errorMessage =
-            "Microphone access required - please allow microphone access";
-          break;
-        case "call_timeout":
-          errorMessage =
-            "Call timeout - phone number may be invalid or unavailable";
-          break;
-        case "call_failed":
-          errorMessage = "Call failed - please try again";
-          break;
-        case "call_rejected":
-          errorMessage = "Call rejected - number may be invalid or unavailable";
-          break;
-        case "audio_setup":
-          errorMessage = "Audio setup failed - call quality may be affected";
-          break;
-        case "network_poor":
-          errorMessage = "Poor network detected - audio quality may be reduced";
-          break;
-        case "invalid_number":
-          errorMessage = "Invalid phone number - please check and try again";
-          break;
-        default:
-          if (error?.message) {
-            errorMessage = error.message;
-          } else if (typeof error === "string") {
-            errorMessage = error;
-          }
-      }
-
-      setError(errorMessage);
-
-      // Track error in database if call context is available
-      if (call && userId) {
-        DatabaseService.trackCall({
-          user_id: userId,
-          phone_number: call.phoneNumber || config.phoneNumber,
-          status: "failed",
-          call_control_id: call.call_control_id,
-        });
-      }
-
-      // Notify parent of error
-      if (onCallStatusChange) {
-        onCallStatusChange(
-          "failed",
-          call?.phoneNumber || config.phoneNumber,
-          undefined
-        );
-      }
-    },
-    [userId, config.phoneNumber, onCallStatusChange]
-  );
-
-  // State transition function to ensure valid state changes
   const transitionCallState = useCallback(
     (newState: CallState, call?: any) => {
-      console.log(`Call state transition: ${callState} -> ${newState}`);
+      setCallState((currentState) => {
+        if (currentState === newState) {
+          return currentState;
+        }
 
-      // Validate state transitions
-      const validTransitions: Record<CallState, CallState[]> = {
-        idle: ["connecting", "trying"],
-        connecting: ["trying", "ringing", "failed", "error", "idle"],
-        trying: ["ringing", "answered", "failed", "error", "idle"],
-        ringing: ["answered", "failed", "error", "idle"],
-        answered: ["active", "ended", "failed", "error"],
-        active: ["ended", "failed", "error"],
-        ended: ["idle"],
-        failed: ["idle"],
-        error: ["idle"],
-      };
+        // Validate state transitions
+        const validTransitions: Record<CallState, CallState[]> = {
+          idle: ["connecting", "trying"],
+          connecting: ["trying", "ringing", "failed", "error", "idle"],
+          trying: ["ringing", "answered", "failed", "error", "idle"],
+          ringing: ["answered", "failed", "error", "idle"],
+          answered: ["active", "ended", "failed", "error"],
+          active: ["ended", "failed", "error"],
+          ended: ["idle"],
+          failed: ["idle"],
+          error: ["idle"],
+        };
 
-      if (!validTransitions[callState].includes(newState)) {
-        console.warn(`Invalid state transition: ${callState} -> ${newState}`);
-        return;
-      }
+        if (!validTransitions[currentState].includes(newState)) {
+          return currentState;
+        }
 
-      // Validate call object for active states
-      if ((newState === "answered" || newState === "active") && !call) {
-        console.error("Call object required for active states");
-        return;
-      }
-
-      setCallState(newState);
+        return newState;
+      });
 
       // Update related states based on call state
       switch (newState) {
@@ -895,9 +230,7 @@ export const useTelnyxWebRTC = (
           setCallControlId(null);
           setCallStartTime(null);
           setError(null);
-          cleanupAudio();
-          stopCallStreaming();
-          cleanupTimeouts();
+          cleanupAll();
           break;
         case "connecting":
         case "trying":
@@ -921,839 +254,845 @@ export const useTelnyxWebRTC = (
           if (!callStartTime) {
             setCallStartTime(Date.now());
           }
-          cleanupTimeouts(); // Clear timeouts when call becomes active
           break;
         case "ended":
-          setIsConnecting(false);
-          setIsCallActive(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          setError(null);
-          cleanupAudio();
-          stopCallStreaming();
-          cleanupTimeouts();
-          break;
         case "failed":
         case "error":
           setIsConnecting(false);
           setIsCallActive(false);
-          setCurrentCall(null);
-          setCallControlId(null);
-          cleanupAudio();
-          stopCallStreaming();
-          cleanupTimeouts();
+          setError(null);
           break;
       }
     },
-    [callState, callStartTime, cleanupAudio, stopCallStreaming, cleanupTimeouts]
+    [cleanupAll]
   );
 
-  // Network reconnection logic with exponential backoff
+  // ============================================================================
+  // RECONNECTION LOGIC
+  // ============================================================================
+
   const attemptReconnection = useCallback(async () => {
     if (reconnectionAttempts >= 5) {
-      console.log("Max reconnection attempts reached");
       setError(
-        "Unable to reconnect after multiple attempts. Please refresh the page."
+        "Failed to reconnect after multiple attempts. Please refresh the page or check your credentials."
       );
       setIsReconnecting(false);
       return;
     }
 
-    const delay = Math.min(1000 * Math.pow(2, reconnectionAttempts), 30000); // Max 30 seconds
-    console.log(
-      `Attempting reconnection in ${delay}ms (attempt ${
-        reconnectionAttempts + 1
-      })`
-    );
+    const delay = Math.min(1000 * Math.pow(2, reconnectionAttempts), 30000);
 
-    setTimeout(async () => {
-      try {
-        if (client && typeof client.connect === "function") {
-          console.log("Attempting to reconnect...");
+    const reconnectTimeout = setTimeout(async () => {
+      if (client && typeof client.connect === "function") {
+        try {
           await client.connect();
+          setReconnectionAttempts(0);
+          setIsReconnecting(false);
+          setError(null);
+        } catch (error) {
+          console.error("Reconnection failed:", error);
           setReconnectionAttempts((prev) => prev + 1);
-        }
-      } catch (err) {
-        console.error("Reconnection attempt failed:", err);
-        setReconnectionAttempts((prev) => prev + 1);
-
-        // Try again if we haven't reached max attempts
-        if (reconnectionAttempts < 4) {
+          setError(
+            `Reconnection failed (attempt ${
+              reconnectionAttempts + 1
+            }/5). Retrying...`
+          );
+          // Continue attempting reconnection
           attemptReconnection();
         }
+      } else {
+        console.error("Client not available for reconnection");
+        setError(
+          "Client not available for reconnection. Please refresh the page."
+        );
+        setIsReconnecting(false);
       }
     }, delay);
+
+    timeoutManager.current.addTimeout(reconnectTimeout);
   }, [client, reconnectionAttempts]);
 
-  // Make a call
+  // Manual reconnection trigger
+  const triggerReconnection = useCallback(async () => {
+    if (isReconnecting || isInitializing) {
+      return;
+    }
+
+    setReconnectionAttempts(0);
+    setError("Attempting to reconnect...");
+    setIsReconnecting(true);
+
+    try {
+      if (client && typeof client.connect === "function") {
+        await client.connect();
+        setIsReconnecting(false);
+        setError(null);
+      } else {
+        throw new Error("Client not available");
+      }
+    } catch (error) {
+      console.error("Manual reconnection failed:", error);
+      setError(
+        "Manual reconnection failed. Please check your credentials and network."
+      );
+      setIsReconnecting(false);
+    }
+  }, [client, isReconnecting, isInitializing]);
+
+  // Retry microphone access
+  const retryMicrophoneAccess = useCallback(async () => {
+    if (hasMicrophoneAccess) {
+      return;
+    }
+
+    setError("Attempting to access microphone...");
+
+    try {
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 48000,
+          channelCount: 1,
+        },
+        video: false,
+      });
+
+      localStreamRef.current = stream;
+      setHasMicrophoneAccess(true);
+      setError(null);
+    } catch (micError: unknown) {
+      console.error("Failed to get microphone access on retry:", micError);
+
+      let errorMessage = "Failed to access microphone";
+      if (micError instanceof Error) {
+        if (micError.name === "NotAllowedError") {
+          errorMessage =
+            "Microphone access denied. Please allow microphone permissions and try again.";
+        } else if (micError.name === "NotFoundError") {
+          errorMessage =
+            "No microphone found. Please connect a microphone and try again.";
+        } else if (micError.name === "NotReadableError") {
+          errorMessage =
+            "Microphone is in use by another application. Please close other apps using the microphone.";
+        } else if (micError.name === "OverconstrainedError") {
+          errorMessage =
+            "Microphone doesn't meet requirements. Please try a different microphone.";
+        }
+      }
+
+      setError(errorMessage);
+      setHasMicrophoneAccess(false);
+    }
+  }, [hasMicrophoneAccess]);
+
+  // ============================================================================
+  // DATABASE TRACKING
+  // ============================================================================
+
+  const trackCall = useCallback(
+    (call: any, status: "completed" | "failed", duration?: number) => {
+      if (!userId) return;
+
+      DatabaseService.trackCall({
+        user_id: userId,
+        phone_number: call.phoneNumber || config.phoneNumber,
+        status,
+        call_control_id: call.call_control_id,
+        duration,
+      });
+    },
+    [userId, config.phoneNumber]
+  );
+
+  const notifyCallStatus = useCallback(
+    (
+      status: "completed" | "failed" | "missed" | "incoming",
+      phoneNumber?: string,
+      duration?: number
+    ) => {
+      if (onCallStatusChange) {
+        onCallStatusChange(status, phoneNumber, duration);
+      }
+    },
+    [onCallStatusChange]
+  );
+
+  // ============================================================================
+  // EVENT HANDLER SETUP
+  // ============================================================================
+
+  const setupEventHandlers = useCallback(
+    (telnyxClient: any) => {
+      // Connection events
+      telnyxClient.on("telnyx.ready", () => {
+        setIsConnected(true);
+        setError(null);
+        setIsInitializing(false);
+        initializingRef.current = false;
+        initializedRef.current = true;
+        // Only set configRef after successful connection
+        configRef.current = config;
+      });
+
+      telnyxClient.on("telnyx.error", (error: any) => {
+        console.error("Telnyx client error:", error);
+
+        const errorMessages: Record<string, string> = {
+          AUTH_FAILED: "Authentication failed - please check credentials",
+          NETWORK_ERROR: "Network error - please check connection",
+          INVALID_CONFIG: "Invalid configuration - please check settings",
+        };
+
+        const errorMessage =
+          errorMessages[error.code] ||
+          `Telnyx error: ${error.message || "Unknown error"}`;
+
+        setError(errorMessage);
+        setIsConnected(false);
+        setIsInitializing(false);
+        initializingRef.current = false;
+        // Don't set initializedRef to true on error - let it retry
+        // initializedRef.current = true;
+        // Don't set configRef.current on error - let it retry with fresh config
+
+        if (error.code === "AUTH_FAILED" || error.code === "INVALID_CONFIG") {
+          transitionCallState("idle");
+        }
+      });
+
+      telnyxClient.on("telnyx.invalid", (error: any) => {
+        console.error("Telnyx invalid call error:", error);
+        setError(
+          `Invalid call: ${
+            error.message || "The phone number is invalid or cannot be reached"
+          }`
+        );
+        setIsConnected(false);
+        setIsInitializing(false);
+        initializingRef.current = false;
+        // Don't set initializedRef to true on error - let it retry
+        // initializedRef.current = true;
+        // Don't set configRef.current on error - let it retry with fresh config
+      });
+
+      telnyxClient.on("telnyx.close", () => {
+        setIsConnected(false);
+        setError("Connection closed");
+        transitionCallState("idle");
+      });
+
+      // Call events
+      telnyxClient.on("call", (call: any) => {
+        if (call.state) {
+          switch (call.state) {
+            case "ringing":
+              transitionCallState("ringing", call);
+              break;
+            case "answered":
+              transitionCallState("answered", call);
+              break;
+            case "ended":
+            case "hangup":
+            case "destroy":
+              transitionCallState("ended", call);
+              break;
+            default:
+              if (call.state.includes("fail") || call.state.includes("error")) {
+                transitionCallState("failed", call);
+                setError(`Call failed: ${call.state}`);
+              }
+              break;
+          }
+        }
+      });
+
+      // Specific call event handlers
+      const callEventHandlers = {
+        "call.hangup": (call: any) => {
+          const duration = callStartTime
+            ? Math.floor((Date.now() - callStartTime) / 1000)
+            : undefined;
+          transitionCallState("ended", call);
+          trackCall(call, "completed", duration);
+          notifyCallStatus(
+            "completed",
+            call.phoneNumber || config.phoneNumber,
+            duration
+          );
+        },
+
+        "call.failed": (call: any) => {
+          transitionCallState("failed", call);
+          setError("Call failed - Invalid phone number or connection error");
+          trackCall(call, "failed");
+          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
+        },
+
+        "call.rejected": (call: any) => {
+          transitionCallState("failed", call);
+          setError("Call rejected");
+          trackCall(call, "failed");
+          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
+        },
+
+        "call.error": (call: any, error: any) => {
+          transitionCallState("error", call);
+          setError("Call failed");
+          trackCall(call, "failed");
+          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
+        },
+
+        "call.busy": (call: any) => {
+          transitionCallState("failed", call);
+          setError("Number is busy");
+          trackCall(call, "failed");
+          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
+        },
+
+        "call.no-answer": (call: any) => {
+          transitionCallState("failed", call);
+          setError("No answer - call timed out");
+          trackCall(call, "failed");
+          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
+        },
+
+        "call.destroy": (call: any) => {
+          const duration = callStartTime
+            ? Math.floor((Date.now() - callStartTime) / 1000)
+            : undefined;
+
+          if (call.state === "hangup" && callState === "connecting") {
+            setError(
+              "Call failed - Phone number may be invalid or unavailable"
+            );
+            transitionCallState("failed", call);
+            trackCall(call, "failed");
+            notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
+          } else if (call.state === "destroy" && callState === "connecting") {
+            setError(
+              "Call connection failed - Please check your network connection"
+            );
+            transitionCallState("failed", call);
+            trackCall(call, "failed");
+            notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
+          } else {
+            transitionCallState("ended", call);
+            trackCall(call, "completed", duration);
+            notifyCallStatus(
+              "completed",
+              call.phoneNumber || config.phoneNumber,
+              duration
+            );
+          }
+        },
+
+        "call.ringing": (call: any) => {
+          transitionCallState("ringing", call);
+          setCurrentCall(call);
+        },
+
+        "call.answered": (call: any) => {
+          transitionCallState("answered", call);
+          setIsCallActive(true);
+          setIsConnecting(false);
+          setCallStartTime(Date.now());
+          trackCall(call, "completed");
+          notifyCallStatus("completed", call.phoneNumber || config.phoneNumber);
+        },
+
+        "call.progress": (call: any) => {
+          // Call progress event
+        },
+
+        "call.early": (call: any) => {
+          // Early media event
+        },
+      };
+
+      // Register all call event handlers
+      Object.entries(callEventHandlers).forEach(([event, handler]) => {
+        telnyxClient.on(event, handler);
+      });
+
+      // Network events
+      telnyxClient.on("connection.lost", () => {
+        setIsConnected(false);
+        setError("Connection lost - attempting to reconnect...");
+        setIsReconnecting(true);
+        attemptReconnection();
+      });
+
+      telnyxClient.on("connection.restored", () => {
+        setIsConnected(true);
+        setIsReconnecting(false);
+        setReconnectionAttempts(0);
+        setError(null);
+        setNetworkQuality("good");
+      });
+
+      telnyxClient.on("connection.failed", () => {
+        setIsReconnecting(false);
+        setError(
+          "Failed to reconnect - please check your connection and try again"
+        );
+
+        const resetTimeout = setTimeout(() => {
+          setReconnectionAttempts(0);
+        }, 30000);
+
+        timeoutManager.current.addTimeout(resetTimeout);
+      });
+
+      // Network quality monitoring
+      telnyxClient.on("network.quality", (quality: any) => {
+        if (quality && quality.score) {
+          const score = quality.score;
+          let newQuality: NetworkQuality;
+
+          if (score >= 0.8) newQuality = "excellent";
+          else if (score >= 0.6) newQuality = "good";
+          else if (score >= 0.4) newQuality = "fair";
+          else newQuality = "poor";
+
+          setNetworkQuality(newQuality);
+
+          if (newQuality === "poor" || newQuality === "fair") {
+            if (isCallActive || isConnecting) {
+              setError(
+                `Poor network detected (${newQuality}) - audio quality may be reduced`
+              );
+            }
+          } else if (newQuality === "excellent" || newQuality === "good") {
+            if (error && error.includes("network")) {
+              setError(null);
+            }
+          }
+        }
+      });
+    },
+    [
+      config,
+      callStartTime,
+      callState,
+      transitionCallState,
+      trackCall,
+      notifyCallStatus,
+      attemptReconnection,
+      error,
+      isCallActive,
+      isConnecting,
+    ]
+  );
+
+  // ============================================================================
+  // CLIENT INITIALIZATION
+  // ============================================================================
+
+  useEffect(() => {
+    // Don't run if user is not authenticated yet
+    if (!userId) {
+      return;
+    }
+
+    // Additional check: if we already have a client and user ID is the same, don't initialize
+    if (client && userId === previousUserIdRef.current) {
+      return;
+    }
+
+    // Update the previous user ID reference
+    previousUserIdRef.current = userId;
+
+    // Check if config has actually changed
+    const configChanged =
+      !configRef.current ||
+      configRef.current.apiKey !== config.apiKey ||
+      configRef.current.sipUsername !== config.sipUsername ||
+      configRef.current.sipPassword !== config.sipPassword ||
+      configRef.current.phoneNumber !== config.phoneNumber;
+
+    // Prevent infinite re-rendering by adding a check for rapid config changes
+    if (configRef.current && !configChanged) {
+      return;
+    }
+
+    // Additional check: if we're already initializing, don't start another initialization
+    if (initializingRef.current) {
+      return;
+    }
+
+    if (
+      !config.apiKey ||
+      !config.sipUsername ||
+      !config.sipPassword ||
+      !config.phoneNumber
+    ) {
+      setError("Missing Telnyx credentials");
+      return;
+    }
+
+    // Additional check: if any config value is empty string, don't initialize
+    if (
+      config.apiKey.trim() === "" ||
+      config.sipUsername.trim() === "" ||
+      config.sipPassword.trim() === "" ||
+      config.phoneNumber.trim() === ""
+    ) {
+      setError("Missing Telnyx credentials");
+      return;
+    }
+
+    // Prevent duplicate initialization
+    if (client) {
+      return;
+    }
+
+    // Additional check: if we already have a client, don't initialize again
+    if (client || initializedRef.current) {
+      return;
+    }
+
+    initializingRef.current = true;
+    setIsInitializing(true);
+
+    const initializeClient = async () => {
+      try {
+        if (typeof TelnyxRTC === "undefined") {
+          setError("Telnyx WebRTC SDK not loaded");
+          return;
+        }
+
+        // Get microphone access - but don't block Telnyx initialization
+        try {
+          const stream = await navigator.mediaDevices.getUserMedia({
+            audio: {
+              echoCancellation: true,
+              noiseSuppression: true,
+              autoGainControl: true,
+              sampleRate: 48000,
+              channelCount: 1,
+            },
+            video: false,
+          });
+          localStreamRef.current = stream;
+          setHasMicrophoneAccess(true);
+        } catch (micError: unknown) {
+          console.error("Failed to get microphone access:", micError);
+
+          // Provide specific error messages based on the error type
+          let errorMessage = "Microphone access required for calls";
+          if (micError instanceof Error) {
+            if (micError.name === "NotAllowedError") {
+              errorMessage =
+                "Microphone access denied. Please allow microphone permissions and refresh the page.";
+            } else if (micError.name === "NotFoundError") {
+              errorMessage =
+                "No microphone found. Please connect a microphone and refresh the page.";
+            } else if (micError.name === "NotReadableError") {
+              errorMessage =
+                "Microphone is in use by another application. Please close other apps using the microphone.";
+            } else if (micError.name === "OverconstrainedError") {
+              errorMessage =
+                "Microphone doesn't meet requirements. Please try a different microphone.";
+            }
+          }
+
+          // Set error for microphone issues but continue with Telnyx
+          setError(errorMessage);
+          setHasMicrophoneAccess(false);
+          // Don't return here - continue with Telnyx initialization
+        }
+
+        const telnyxClient = new TelnyxRTC({
+          login_token: config.apiKey,
+          login: config.sipUsername,
+          password: config.sipPassword,
+        });
+
+        // Setup all event handlers
+        setupEventHandlers(telnyxClient);
+
+        setClient(telnyxClient);
+
+        // Connect to Telnyx
+        await telnyxClient.connect();
+        setIsInitializing(false);
+        initializingRef.current = false;
+        // Don't set initializedRef here - let the telnyx.ready event handle it
+        // Don't set configRef here - let the telnyx.ready event handle it
+      } catch (err) {
+        console.error("Failed to initialize Telnyx client:", err);
+
+        // Provide more specific error messages
+        let errorMessage = "Failed to initialize WebRTC client";
+        if (err instanceof Error) {
+          if (err.message.includes("login_token")) {
+            errorMessage =
+              "Invalid API key - please check your Telnyx credentials";
+          } else if (err.message.includes("login")) {
+            errorMessage =
+              "Invalid SIP username - please check your Telnyx credentials";
+          } else if (err.message.includes("password")) {
+            errorMessage =
+              "Invalid SIP password - please check your Telnyx credentials";
+          } else if (err.message.includes("network")) {
+            errorMessage =
+              "Network error - please check your internet connection";
+          } else {
+            errorMessage = `Telnyx initialization failed: ${err.message}`;
+          }
+        }
+
+        setError(errorMessage);
+        setIsInitializing(false);
+        initializingRef.current = false;
+      }
+    };
+
+    initializeClient();
+
+    return () => {
+      cleanupAll();
+    };
+  }, [
+    userId,
+    config.apiKey,
+    config.sipUsername,
+    config.sipPassword,
+    config.phoneNumber,
+  ]);
+
+  // ============================================================================
+  // CALL MANAGEMENT FUNCTIONS
+  // ============================================================================
+
   const makeCall = useCallback(
     async (phoneNumber: string) => {
-      if (!client || !isConnected) {
-        setError("Not connected to Telnyx");
+      // Enhanced validation - check both connection and microphone
+      if (!client) {
+        setError("Telnyx client not initialized");
         return;
       }
 
-      // Basic phone number validation
+      if (!isConnected) {
+        setError(
+          "Not connected to Telnyx. Please wait for connection or check credentials."
+        );
+        // Attempt to reconnect if not connected
+        if (!isReconnecting && !isInitializing) {
+          setIsReconnecting(true);
+          attemptReconnection();
+        }
+        return;
+      }
+
+      if (!hasMicrophoneAccess) {
+        setError(
+          "Microphone access required for calls. Please allow microphone permissions."
+        );
+        return;
+      }
+
+      // Phone number validation
       const cleanedNumber = phoneNumber.replace(/[^\d+]/g, "");
       if (cleanedNumber.length < 7) {
         setError("Phone number must be at least 7 digits");
         return;
       }
 
-      // Additional validation for common invalid patterns
-      if (
-        cleanedNumber === "0000000000" ||
-        cleanedNumber === "1111111111" ||
-        cleanedNumber === "9999999999" ||
-        cleanedNumber === "1234567890"
-      ) {
-        setError("Please enter a valid phone number");
-        return;
-      }
-
-      if (!hasMicrophoneAccess) {
-        handleError("microphone", "Microphone access required for calls");
-        return;
-      }
-
       try {
         setIsConnecting(true);
         setError(null);
-        console.log("Attempting to make call to:", phoneNumber);
 
         const handleCallCreation = (call: any) => {
-          // Validate that call object is created and has required methods
           if (!call || typeof call !== "object") {
             throw new Error("Failed to create call object");
-          }
-
-          console.log("Call object created:", call);
-          console.log("Call object type:", typeof call);
-          console.log("Call object keys:", Object.keys(call));
-          console.log("Call object prototype:", Object.getPrototypeOf(call));
-          console.log("Has 'on' method:", typeof call.on === "function");
-          console.log(
-            "Has 'addEventListener' method:",
-            typeof call.addEventListener === "function"
-          );
-          console.log(
-            "Has 'addListener' method:",
-            typeof call.addListener === "function"
-          );
-
-          // Try to find the correct event handling method
-          let eventHandler: any = null;
-          if (typeof call.on === "function") {
-            eventHandler = call.on;
-            console.log("Using call.on method");
-          } else if (typeof call.addEventListener === "function") {
-            eventHandler = call.addEventListener;
-            console.log("Using call.addEventListener method");
-          } else if (typeof call.addListener === "function") {
-            eventHandler = call.addListener;
-            console.log("Using call.addListener method");
-          } else {
-            console.warn("No event handling method found on call object");
-            // Continue without event handlers - the call might still work
-          }
-
-          if (eventHandler) {
-            // Set up call event handlers with proper error handling
-            try {
-              eventHandler("ringing", () => {
-                console.log("Call is ringing - setting connecting state");
-                setIsConnecting(true);
-                setIsCallActive(false);
-                setCurrentCall(call);
-                setError(null); // Clear any previous errors
-
-                // Extract call control ID
-                if (call.call_control_id) {
-                  setCallControlId(call.call_control_id);
-                }
-              });
-            } catch (err) {
-              console.error("Failed to set up ringing event handler:", err);
-            }
-
-            try {
-              eventHandler("answered", () => {
-                console.log("Call answered - setting active state");
-                setIsConnecting(false);
-                setIsCallActive(true);
-                setCurrentCall(call);
-                setError(null);
-                setCallStartTime(Date.now()); // Start tracking call duration
-
-                // Extract call control ID if not already set
-                if (call.call_control_id && !callControlId) {
-                  setCallControlId(call.call_control_id);
-                }
-
-                // Set up audio streams immediately when call is answered
-                setupCallAudioStreams(call);
-
-                // Debug audio setup after a short delay
-                setTimeout(() => {
-                  debugAudioSetup();
-                }, 1000);
-
-                // Start call streaming to receive audio
-                if (call.call_control_id) {
-                  startCallStreaming(call.call_control_id);
-                }
-              });
-            } catch (err) {
-              console.error("Failed to set up answered event handler:", err);
-            }
-
-            try {
-              eventHandler("ended", () => {
-                console.log("Call ended");
-                const duration = callStartTime
-                  ? Math.floor((Date.now() - callStartTime) / 1000)
-                  : undefined;
-                setIsCallActive(false);
-                setIsConnecting(false);
-                setCurrentCall(null);
-                setCallControlId(null);
-                setCallStartTime(null);
-                cleanupAudio();
-                stopCallStreaming();
-
-                // Notify parent of call end with duration
-                if (onCallStatusChange) {
-                  onCallStatusChange(
-                    "completed",
-                    call.phoneNumber || config.phoneNumber,
-                    duration
-                  );
-                }
-              });
-            } catch (err) {
-              console.error("Failed to set up ended event handler:", err);
-            }
-
-            // Add missing state handlers for comprehensive call management
-            try {
-              eventHandler("busy", () => {
-                console.log("Call busy - number is busy");
-                setIsCallActive(false);
-                setIsConnecting(false);
-                setCurrentCall(null);
-                setCallControlId(null);
-                setError("Number is busy - please try again later");
-                cleanupAudio();
-                stopCallStreaming();
-
-                // Track failed call if userId is provided
-                if (userId) {
-                  DatabaseService.trackCall({
-                    user_id: userId,
-                    phone_number: phoneNumber,
-                    status: "failed",
-                  });
-                }
-
-                // Notify parent of failed call
-                if (onCallStatusChange) {
-                  onCallStatusChange("failed", phoneNumber, undefined);
-                }
-              });
-            } catch (err) {
-              console.error("Failed to set up busy event handler:", err);
-            }
-
-            try {
-              eventHandler("no-answer", () => {
-                console.log("Call no-answer - no one answered");
-                setIsCallActive(false);
-                setIsConnecting(false);
-                setCurrentCall(null);
-                setCallControlId(null);
-                setError("No answer - please try again later");
-                cleanupAudio();
-                stopCallStreaming();
-
-                // Track failed call if userId is provided
-                if (userId) {
-                  DatabaseService.trackCall({
-                    user_id: userId,
-                    phone_number: phoneNumber,
-                    status: "failed",
-                  });
-                }
-
-                // Notify parent of failed call
-                if (onCallStatusChange) {
-                  onCallStatusChange("failed", phoneNumber, undefined);
-                }
-              });
-            } catch (err) {
-              console.error("Failed to set up no-answer event handler:", err);
-            }
-
-            try {
-              eventHandler("forwarded", () => {
-                console.log("Call forwarded - call was forwarded");
-                // Keep call active but update status
-                setError("Call was forwarded to another number");
-              });
-            } catch (err) {
-              console.error("Failed to set up forwarded event handler:", err);
-            }
-
-            try {
-              eventHandler("queued", () => {
-                console.log("Call queued - waiting in queue");
-                setError("Call is in queue - please wait");
-              });
-            } catch (err) {
-              console.error("Failed to set up queued event handler:", err);
-            }
-
-            try {
-              eventHandler("cancelled", () => {
-                console.log("Call cancelled - call was cancelled");
-                setIsCallActive(false);
-                setIsConnecting(false);
-                setCurrentCall(null);
-                setCallControlId(null);
-                setError("Call was cancelled");
-                cleanupAudio();
-                stopCallStreaming();
-
-                // Track cancelled call if userId is provided
-                if (userId) {
-                  DatabaseService.trackCall({
-                    user_id: userId,
-                    phone_number: phoneNumber,
-                    status: "failed",
-                  });
-                }
-
-                // Notify parent of cancelled call
-                if (onCallStatusChange) {
-                  onCallStatusChange("failed", phoneNumber, undefined);
-                }
-              });
-            } catch (err) {
-              console.error("Failed to set up cancelled event handler:", err);
-            }
-
-            try {
-              eventHandler("remoteStream", (stream: MediaStream) => {
-                console.log("Remote stream received:", stream);
-                if (remoteAudioRef.current) {
-                  remoteAudioRef.current.srcObject = stream;
-                }
-              });
-            } catch (err) {
-              console.error(
-                "Failed to set up remoteStream event handler:",
-                err
-              );
-            }
-
-            // Add failure event handlers to the call object itself
-            try {
-              call.on("failed", (error: any) => {
-                console.log("Call failed event on call object:", error);
-                setIsCallActive(false);
-                setIsConnecting(false);
-                setCurrentCall(null);
-                setCallControlId(null);
-                setError(
-                  `Call failed: ${
-                    error?.message || "Invalid phone number or connection error"
-                  }`
-                );
-                cleanupAudio();
-                stopCallStreaming();
-
-                // Track failed call if userId is provided
-                if (userId) {
-                  DatabaseService.trackCall({
-                    user_id: userId,
-                    phone_number: phoneNumber,
-                    status: "failed",
-                  });
-                }
-
-                // Notify parent of failed call
-                if (onCallStatusChange) {
-                  onCallStatusChange("failed", phoneNumber, undefined);
-                }
-              });
-            } catch (err) {
-              console.error(
-                "Failed to set up failed event handler on call:",
-                err
-              );
-            }
-
-            try {
-              call.on("error", (error: any) => {
-                console.log("Call error event on call object:", error);
-                setIsCallActive(false);
-                setIsConnecting(false);
-                setCurrentCall(null);
-                setCallControlId(null);
-                setError(
-                  `Call error: ${error?.message || "Unknown error occurred"}`
-                );
-                cleanupAudio();
-                stopCallStreaming();
-
-                // Track failed call if userId is provided
-                if (userId) {
-                  DatabaseService.trackCall({
-                    user_id: userId,
-                    phone_number: phoneNumber,
-                    status: "failed",
-                  });
-                }
-
-                // Notify parent of failed call
-                if (onCallStatusChange) {
-                  onCallStatusChange("failed", phoneNumber, undefined);
-                }
-              });
-            } catch (err) {
-              console.error(
-                "Failed to set up error event handler on call:",
-                err
-              );
-            }
-          } else {
-            console.warn(
-              "No event handlers set up - call may not provide real-time updates"
-            );
-            // Set a timeout to check call status periodically
-            const checkCallStatus = setInterval(() => {
-              if (call.state) {
-                console.log("Call state:", call.state);
-                if (call.state === "answered" || call.state === "active") {
-                  setIsConnecting(false);
-                  setIsCallActive(true);
-                  setCurrentCall(call);
-                  setError(null);
-                  clearInterval(checkCallStatus);
-
-                  // Set up audio streams
-                  setupCallAudioStreams(call);
-
-                  if (call.call_control_id) {
-                    setCallControlId(call.call_control_id);
-                    startCallStreaming(call.call_control_id);
-                  }
-                } else if (call.state === "ended" || call.state === "failed") {
-                  setIsCallActive(false);
-                  setIsConnecting(false);
-                  setCurrentCall(null);
-                  setCallControlId(null);
-                  cleanupAudio();
-                  stopCallStreaming();
-                  clearInterval(checkCallStatus);
-                }
-              }
-            }, 1000);
           }
 
           setCurrentCall(call);
           transitionCallState("connecting", call);
 
-          // Consolidated timeout handler to prevent race conditions
-          const clearAllTimeouts = () => {
-            if (callTimeoutRef.current) {
-              clearTimeout(callTimeoutRef.current);
-              callTimeoutRef.current = null;
-            }
-            if (tryingTimeoutRef.current) {
-              clearTimeout(tryingTimeoutRef.current);
-              tryingTimeoutRef.current = null;
-            }
-            if (statusCheckRef.current) {
-              clearInterval(statusCheckRef.current);
-              statusCheckRef.current = null;
-            }
-          };
-
-          // Set up periodic status check for calls without event handlers
-          if (!call.on || typeof call.on !== "function") {
-            statusCheckRef.current = setInterval(() => {
-              if (call.state) {
-                console.log("Call state check:", call.state);
-                switch (call.state) {
-                  case "trying":
-                    transitionCallState("trying", call);
-                    break;
-                  case "ringing":
-                    transitionCallState("ringing", call);
-                    break;
-                  case "answered":
-                  case "active":
-                    transitionCallState("active", call);
-                    setupCallAudioStreams(call);
-                    if (call.call_control_id) {
-                      setCallControlId(call.call_control_id);
-                      startCallStreaming(call.call_control_id);
-                    }
-                    clearAllTimeouts();
-                    break;
-                  case "ended":
-                  case "failed":
-                    transitionCallState("ended", call);
-                    clearAllTimeouts();
-                    break;
-                }
-              }
-            }, 1000);
-          }
-
-          // Set timeout for calls stuck in trying state (3 seconds)
-          tryingTimeoutRef.current = setTimeout(() => {
-            if (callState === "trying" || callState === "connecting") {
-              console.log("Call stuck in trying state - likely invalid number");
-              transitionCallState("failed", call);
-              setError(
-                "Call failed - Phone number may be invalid or unavailable"
-              );
-
-              // Track failed call if userId is provided
-              if (userId) {
-                DatabaseService.trackCall({
-                  user_id: userId,
-                  phone_number: phoneNumber,
-                  status: "failed",
-                });
-              }
-
-              // Notify parent of failed call
-              if (onCallStatusChange) {
-                onCallStatusChange("failed", phoneNumber, undefined);
-              }
-              clearAllTimeouts();
-            }
-          }, 3000);
-
-          // Set timeout for overall call timeout (5 seconds)
-          callTimeoutRef.current = setTimeout(() => {
+          // Set timeout for call progression
+          const callProgressionTimeout = setTimeout(() => {
             if (callState === "connecting" || callState === "trying") {
-              console.log("Call timeout - no response after 5 seconds");
               transitionCallState("failed", call);
               setError(
-                "Call timeout - Phone number may be invalid or unavailable"
+                "Call failed - please check the phone number and try again"
               );
-
-              // Track failed call if userId is provided
-              if (userId) {
-                DatabaseService.trackCall({
-                  user_id: userId,
-                  phone_number: phoneNumber,
-                  status: "failed",
-                });
-              }
-
-              // Notify parent of failed call
-              if (onCallStatusChange) {
-                onCallStatusChange("failed", phoneNumber, undefined);
-              }
-              clearAllTimeouts();
+              trackCall(call, "failed");
+              notifyCallStatus("failed", phoneNumber);
             }
-          }, 5000);
+          }, 15000);
+
+          timeoutManager.current.addTimeout(callProgressionTimeout);
         };
 
-        // Validate that client has newCall method
-        if (typeof client.newCall !== "function") {
-          // Try alternative method names
-          if (typeof (client as any).call === "function") {
-            console.log("Using client.call method instead of newCall");
-            const call = (client as any).call({
-              destinationNumber: phoneNumber,
-              callerNumber: config.phoneNumber,
-            });
-            return handleCallCreation(call);
-          } else if (typeof (client as any).createCall === "function") {
-            console.log("Using client.createCall method instead of newCall");
-            const call = (client as any).createCall({
-              destinationNumber: phoneNumber,
-              callerNumber: config.phoneNumber,
-            });
-            return handleCallCreation(call);
-          } else {
-            throw new Error(
-              "Telnyx client does not have newCall, call, or createCall method"
-            );
-          }
-        }
-
-        const call = client.newCall({
-          destinationNumber: phoneNumber,
-          callerNumber: config.phoneNumber,
-        });
-
-        // Track call initiation if userId is provided
-        if (userId) {
-          DatabaseService.trackCall({
-            user_id: userId,
-            phone_number: phoneNumber,
-            status: "incoming", // Will be updated when call completes
+        // Try different call creation methods
+        let call: any;
+        if (typeof client.newCall === "function") {
+          call = client.newCall({
+            destinationNumber: phoneNumber,
+            callerNumber: config.phoneNumber,
           });
+        } else if (typeof (client as any).call === "function") {
+          call = (client as any).call({
+            destinationNumber: phoneNumber,
+            callerNumber: config.phoneNumber,
+          });
+        } else if (typeof (client as any).createCall === "function") {
+          call = (client as any).createCall({
+            destinationNumber: phoneNumber,
+            callerNumber: config.phoneNumber,
+          });
+        } else {
+          throw new Error(
+            "Telnyx client does not have newCall, call, or createCall method"
+          );
         }
 
-        // Immediately set connecting state for better UX
-        console.log("Call initiated - setting connecting state immediately");
-        setIsConnecting(true);
-        setIsCallActive(false);
-        setCurrentCall(call);
+        if (!call || typeof call !== "object") {
+          transitionCallState("failed", call);
+          setError("Call failed");
+          notifyCallStatus("failed", phoneNumber);
+          return;
+        }
+
+        if (call.error || call.state === "failed" || call.state === "error") {
+          transitionCallState("failed", call);
+          setError("Call failed");
+          notifyCallStatus("failed", phoneNumber);
+          return;
+        }
 
         return handleCallCreation(call);
       } catch (err: any) {
-        handleError("call_failed", err);
+        console.error("Call creation failed:", err);
+        setError(`Call failed: ${err.message || "Unknown error"}`);
         setIsConnecting(false);
+        notifyCallStatus("failed", phoneNumber);
       }
     },
     [
       client,
       isConnected,
-      config.phoneNumber,
-      isConnecting,
-      isCallActive,
       hasMicrophoneAccess,
-      handleCallAnswered,
-      cleanupAudio,
-      callControlId,
-      startCallStreaming,
-      stopCallStreaming,
+      config.phoneNumber,
+      callState,
+      transitionCallState,
+      trackCall,
+      notifyCallStatus,
     ]
   );
 
-  // Hang up call
   const hangupCall = useCallback(() => {
-    if (currentCall) {
+    if (currentCall && typeof currentCall.hangup === "function") {
       try {
-        console.log("Attempting to hang up call");
         currentCall.hangup();
-      } catch (err) {
-        console.error("Failed to hang up call:", err);
-        // Even if hangup fails, we should clean up our local state
+      } catch (error) {
+        console.error("Error hanging up call:", error);
       }
     }
+    transitionCallState("idle");
+  }, [currentCall, transitionCallState]);
 
-    // Calculate call duration before cleanup
-    const duration = callStartTime
-      ? Math.floor((Date.now() - callStartTime) / 1000)
-      : undefined;
-
-    // Always clean up our local state and resources
-    console.log("Cleaning up call resources");
-    transitionCallState("ended", currentCall);
-
-    // Notify parent of call end with duration
-    if (onCallStatusChange) {
-      onCallStatusChange(
-        "completed",
-        currentCall?.phoneNumber || config.phoneNumber,
-        duration
-      );
-    }
-  }, [
-    currentCall,
-    callStartTime,
-    config.phoneNumber,
-    onCallStatusChange,
-    transitionCallState,
-  ]);
-
-  // Debug function to check audio setup
-  const debugAudioSetup = useCallback(() => {
-    console.log("=== AUDIO SETUP DEBUG ===");
-    console.log("Local audio element:", localAudioRef.current);
-    console.log("Remote audio element:", remoteAudioRef.current);
-    console.log("Local stream:", localStreamRef.current);
-    console.log("Current call:", currentCall);
-
-    if (localAudioRef.current) {
-      console.log("Local audio muted:", localAudioRef.current.muted);
-      console.log("Local audio srcObject:", localAudioRef.current.srcObject);
-    }
-
-    if (remoteAudioRef.current) {
-      console.log("Remote audio muted:", remoteAudioRef.current.muted);
-      console.log("Remote audio srcObject:", remoteAudioRef.current.srcObject);
-      console.log("Remote audio volume:", remoteAudioRef.current.volume);
-      console.log(
-        "Remote audio readyState:",
-        remoteAudioRef.current.readyState
-      );
-    }
-
-    if (currentCall) {
-      console.log("Call object:", currentCall);
-      console.log("Call remoteStream:", (currentCall as any).remoteStream);
-      console.log(
-        "Call has getRemoteStream:",
-        typeof (currentCall as any).getRemoteStream === "function"
-      );
-      console.log(
-        "Call has peerConnection:",
-        (currentCall as any).peerConnection
-      );
-    }
-    console.log("=== END AUDIO DEBUG ===");
-  }, [currentCall]);
-
-  // Send DTMF tones during call
   const sendDTMF = useCallback(
     (digit: string) => {
-      if (currentCall && typeof currentCall.dtmf === "function") {
+      if (currentCall && typeof currentCall.sendDTMF === "function") {
         try {
-          currentCall.dtmf(digit);
-        } catch (err) {
-          console.error("Failed to send DTMF:", err);
+          currentCall.sendDTMF(digit);
+        } catch (error) {
+          console.error("Error sending DTMF:", error);
         }
+      } else {
+        console.warn(
+          "Cannot send DTMF - no active call or method not available"
+        );
       }
     },
     [currentCall]
   );
 
-  // Error recovery: Retry failed calls with exponential backoff
+  // ============================================================================
+  // UTILITY FUNCTIONS
+  // ============================================================================
+
   const retryCall = useCallback(
-    async (phoneNumber: string, attempts = 3) => {
-      console.log(`Retrying call to ${phoneNumber} (attempt ${attempts})`);
+    async (phoneNumber: string, maxRetries: number = 3) => {
+      if (currentCall && typeof currentCall.hangup === "function") {
+        currentCall.hangup();
+      }
 
-      for (let i = 0; i < attempts; i++) {
-        try {
-          console.log(`Retry attempt ${i + 1}/${attempts}`);
-          await makeCall(phoneNumber);
-          break; // Success, exit retry loop
-        } catch (err) {
-          console.error(`Retry attempt ${i + 1} failed:`, err);
+      transitionCallState("idle");
+      setError(null);
 
-          if (i === attempts - 1) {
-            // Last attempt failed
-            setError(
-              `Call failed after ${attempts} attempts. Please check the number and try again.`
-            );
-            throw err;
-          }
+      await new Promise((resolve) => setTimeout(resolve, 1000));
 
-          // Wait before next retry with exponential backoff
-          const delay = Math.min(1000 * Math.pow(2, i), 10000); // Max 10 seconds
-          console.log(`Waiting ${delay}ms before next retry...`);
-          await new Promise((resolve) => setTimeout(resolve, delay));
-        }
+      try {
+        await makeCall(phoneNumber);
+      } catch (error) {
+        setError("Retry failed - please try again");
       }
     },
-    [makeCall]
+    [currentCall, transitionCallState, makeCall]
   );
 
-  // Error recovery: Fallback audio configuration
-  const setupFallbackAudio = useCallback(() => {
-    console.log("Setting up fallback audio configuration");
-
-    try {
-      // Try to create audio context with fallback options
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext ||
-          window.webkitAudioContext)({
-          sampleRate: 8000, // Lower sample rate for better compatibility
-          latencyHint: "interactive",
-        });
-      }
-
-      // Set up fallback gain node
-      if (!gainNodeRef.current) {
-        gainNodeRef.current = audioContextRef.current.createGain();
-        gainNodeRef.current.gain.value = 0.5; // Lower volume for fallback
-      }
-
-      console.log("Fallback audio configuration set up successfully");
-    } catch (err) {
-      console.error("Failed to set up fallback audio:", err);
-      setError("Audio setup failed - some features may not work properly");
-    }
+  const clearError = useCallback(() => {
+    setError(null);
   }, []);
 
-  // Error recovery: Graceful degradation for poor network conditions
-  const handleNetworkDegradation = useCallback(() => {
-    console.log("Network degradation detected, applying graceful degradation");
+  const forceResetCallState = useCallback(() => {
+    transitionCallState("idle");
+  }, [transitionCallState]);
 
-    if (networkQuality === "poor" || networkQuality === "fair") {
-      // Show user notification about network quality
-      setError(
-        "Poor network detected - audio quality may be reduced for stability"
-      );
+  const debugAudioSetup = useCallback(() => {
+    // Debug function - can be expanded as needed
+  }, []);
 
-      // Note: AudioContext sampleRate is read-only, so we can't modify it
-      // Instead, we rely on the browser's automatic adaptation
-      console.log(
-        "Network quality is poor - relying on browser audio adaptation"
-      );
-    }
-  }, [networkQuality]);
+  // ============================================================================
+  // CLEANUP ON UNMOUNT
+  // ============================================================================
 
-  // Add browser tab close event listener for auto hangup
   useEffect(() => {
-    const handleBeforeUnload = (event: BeforeUnloadEvent) => {
-      if (isCallActive || isConnecting) {
-        console.log("Browser tab closing - auto hanging up call");
-
-        // Try to hang up the call if possible
-        if (currentCall && typeof currentCall.hangup === "function") {
-          try {
-            currentCall.hangup();
-          } catch (err) {
-            console.error("Failed to hangup call on tab close:", err);
-          }
-        }
-
-        // Clean up audio resources
-        cleanupAudio();
-        stopCallStreaming();
-        cleanupTimeouts();
-
-        // Show confirmation dialog (optional)
-        event.preventDefault();
-        event.returnValue =
-          "You have an active call. Are you sure you want to leave?";
-        return event.returnValue;
-      }
-    };
-
-    // Add the event listener
-    window.addEventListener("beforeunload", handleBeforeUnload);
-
     return () => {
-      // Clean up the event listener
-      window.removeEventListener("beforeunload", handleBeforeUnload);
+      cleanupAll();
     };
-  }, [
-    isCallActive,
-    isConnecting,
-    currentCall,
-    cleanupAudio,
-    stopCallStreaming,
-    cleanupTimeouts,
-  ]);
+  }, [cleanupAll]);
+
+  // ============================================================================
+  // RETURN OBJECT
+  // ============================================================================
 
   return {
+    // Connection state
     isConnected,
+    isInitializing,
+    isReconnecting,
+
+    // Call state
     isCallActive,
     isConnecting,
-    error,
-    hasMicrophoneAccess,
-    callControlId,
     callState,
+    callControlId,
+
+    // Audio state
+    hasMicrophoneAccess,
+    networkQuality,
+
+    // Error handling
+    error,
+
+    // Actions
     makeCall,
     hangupCall,
     sendDTMF,
-    debugAudioSetup,
     retryCall,
-    setupFallbackAudio,
-    handleNetworkDegradation,
-    networkQuality,
-    isReconnecting,
+
+    // Utility functions
+    clearError,
+    forceResetCallState,
+    debugAudioSetup,
+    triggerReconnection,
+    retryMicrophoneAccess,
   };
 };

@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import DialPad from "@/components/DialPad";
 import PhoneMockup from "@/components/PhoneMockup";
 import LoginScreen from "@/components/LoginScreen";
@@ -23,9 +23,13 @@ export default function Home() {
   const [isAdmin, setIsAdmin] = useState(false);
   const [adminStatusChecked, setAdminStatusChecked] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
+  const previousUserIdRef = useRef<string | null>(null);
   const [callDuration, setCallDuration] = useState(0);
+  const [autoRedirectCountdown, setAutoRedirectCountdown] = useState<
+    number | null
+  >(null);
   const { isMobile } = useDeviceDetection();
-  const { user, loading, signOut } = useAuth();
+  const { user, loading, signOut, session } = useAuth();
 
   // Call history hook
   const {
@@ -45,10 +49,34 @@ export default function Home() {
     phoneNumber: process.env.NEXT_PUBLIC_TELNYX_PHONE_NUMBER || "",
   };
 
+  // Check if phone number is incorrectly set to SIP password
+  if (telnyxConfig.phoneNumber === telnyxConfig.sipPassword) {
+    console.error("WARNING: Phone number is set to SIP password value!");
+    console.error(
+      "This indicates an environment variable configuration issue."
+    );
+  }
+
+  // Check if SIP username is incorrectly set to SIP password
+  if (telnyxConfig.sipUsername === telnyxConfig.sipPassword) {
+    console.error("WARNING: SIP username is set to SIP password value!");
+    console.error(
+      "This indicates an environment variable configuration issue."
+    );
+  }
+
+  // Check if all required credentials are present
+  const hasAllCredentials =
+    telnyxConfig.apiKey &&
+    telnyxConfig.sipUsername &&
+    telnyxConfig.sipPassword &&
+    telnyxConfig.phoneNumber;
+
   const {
     isConnected,
     isCallActive,
     isConnecting,
+    isInitializing,
     error,
     hasMicrophoneAccess,
     callControlId,
@@ -58,10 +86,12 @@ export default function Home() {
     sendDTMF,
     debugAudioSetup,
     retryCall,
-    setupFallbackAudio,
-    handleNetworkDegradation,
     networkQuality,
     isReconnecting,
+    forceResetCallState,
+    clearError,
+    triggerReconnection,
+    retryMicrophoneAccess,
   } = useTelnyxWebRTC(
     telnyxConfig,
     user?.id,
@@ -73,21 +103,85 @@ export default function Home() {
     }
   );
 
+  // Auto-reset call state when there are errors to prevent UI from getting stuck
+  useEffect(() => {
+    if (error && (isConnecting || isCallActive)) {
+      // Check if this is a call failure error that should auto-redirect
+      const isCallFailure =
+        error.includes("invalid") ||
+        error.includes("failed") ||
+        error.includes("rejected") ||
+        error.includes("busy") ||
+        error.includes("no-answer") ||
+        error.includes("timeout");
+
+      if (isCallFailure) {
+        // Show error for 3 seconds then auto-redirect to dial pad
+        setAutoRedirectCountdown(3);
+
+        const countdownInterval = setInterval(() => {
+          setAutoRedirectCountdown((prev) => {
+            if (prev && prev > 1) {
+              return prev - 1;
+            } else {
+              clearInterval(countdownInterval);
+              return null;
+            }
+          });
+        }, 1000);
+
+        const resetTimeout = setTimeout(() => {
+          forceResetCallState();
+          setPhoneNumber(""); // Clear the phone number
+          setAutoRedirectCountdown(null);
+        }, 3000);
+
+        return () => {
+          clearTimeout(resetTimeout);
+          clearInterval(countdownInterval);
+        };
+      } else {
+        // For other errors, just reset after 2 seconds
+        const resetTimeout = setTimeout(() => {
+          forceResetCallState();
+        }, 2000);
+
+        return () => clearTimeout(resetTimeout);
+      }
+    }
+  }, [error, isConnecting, isCallActive, forceResetCallState]);
+
+  // Safety timeout to prevent calling screen from getting stuck indefinitely
+  useEffect(() => {
+    if (isConnecting && !isCallActive) {
+      const safetyTimeout = setTimeout(() => {
+        forceResetCallState();
+      }, 10000); // 10 seconds safety timeout
+
+      return () => clearTimeout(safetyTimeout);
+    }
+  }, [isConnecting, isCallActive, forceResetCallState]);
+
+  // Clear countdown when call state changes to idle
+  useEffect(() => {
+    if (callState === "idle") {
+      setAutoRedirectCountdown(null);
+    }
+  }, [callState]);
+
   // Check admin status when user changes
   useEffect(() => {
     let isMounted = true;
     let adminCheckTimeout: NodeJS.Timeout | null = null;
+    const currentUserId = user?.id;
 
     const checkAdminStatus = async () => {
       if (!user || !isMounted || adminStatusChecked) return;
 
       // Prevent multiple simultaneous admin checks
       if (adminCheckTimeout) {
-        console.log("Admin check already in progress, skipping...");
         return;
       }
-
-      console.log("Checking admin status for user:", user.email);
 
       try {
         // Set a timeout to prevent rapid repeated calls
@@ -98,8 +192,11 @@ export default function Home() {
         const adminStatus = await DatabaseService.isUserAdmin(user.id);
 
         if (isMounted) {
-          console.log("Database admin check result:", adminStatus);
-          setIsAdmin(adminStatus);
+          // Only update admin status if it's different from current
+          // This prevents unnecessary state changes that could trigger re-renders
+          if (adminStatus !== isAdmin) {
+            setIsAdmin(adminStatus);
+          }
           setAdminStatusChecked(true); // Mark as checked to prevent repeated calls
         }
       } catch (error) {
@@ -107,8 +204,10 @@ export default function Home() {
           console.error("Error checking admin status:", error);
           // Fallback to email-based admin check
           const fallbackAdmin = user.email?.includes("admin") || false;
-          console.log("Fallback admin check result:", fallbackAdmin);
-          setIsAdmin(fallbackAdmin);
+          // Only update admin status if it's different from current
+          if (fallbackAdmin !== isAdmin) {
+            setIsAdmin(fallbackAdmin);
+          }
           setAdminStatusChecked(true); // Mark as checked even on error
 
           // If it's a network error, set a longer cooldown
@@ -116,9 +215,6 @@ export default function Home() {
             error instanceof Error &&
             error.message.includes("Failed to fetch")
           ) {
-            console.log(
-              "Network error detected, setting longer cooldown for admin checks"
-            );
             // Set a longer cooldown for network errors to prevent infinite loops
             setTimeout(() => {
               setAdminStatusChecked(false);
@@ -137,10 +233,21 @@ export default function Home() {
     // Only check admin status if we have a user and haven't checked recently
     if (user && user.id && !adminStatusChecked) {
       checkAdminStatus();
-    } else if (!user) {
+    } else if (!user && !session) {
+      // Only reset admin status when user is completely logged out
+      // Check both user and session to ensure we're really logged out
       setIsAdmin(false);
-      setAdminStatusChecked(false); // Reset when user changes
+      setAdminStatusChecked(false);
+      previousUserIdRef.current = null;
     }
+
+    // Track user ID changes to prevent unnecessary admin status resets
+    if (user?.id !== previousUserIdRef.current) {
+      previousUserIdRef.current = user?.id || null;
+    }
+
+    // Don't reset admin status if user is still logged in but user object changes
+    // This prevents admin status from being reset during auth state updates
 
     return () => {
       isMounted = false;
@@ -155,7 +262,6 @@ export default function Home() {
     if (error && (isConnecting || isCallActive)) {
       // Wait a moment to show the error, then automatically return to dial pad
       const timer = setTimeout(() => {
-        console.log("Auto-returning to dial pad due to error:", error);
         hangupCall();
         setPhoneNumber("");
       }, 3000); // Show error for 3 seconds before auto-return
@@ -185,17 +291,6 @@ export default function Home() {
   }, [isCallActive, callStartTime]);
 
   // Monitor network quality and apply graceful degradation
-  useEffect(() => {
-    if (networkQuality === "poor" || networkQuality === "fair") {
-      console.log("Network quality degraded, applying graceful degradation");
-      handleNetworkDegradation();
-    }
-  }, [networkQuality, handleNetworkDegradation]);
-
-  // Set up fallback audio configuration on component mount
-  useEffect(() => {
-    setupFallbackAudio();
-  }, [setupFallbackAudio]);
 
   // Global error boundary for admin status checking
   useEffect(() => {
@@ -203,9 +298,6 @@ export default function Home() {
     if (adminStatusChecked === false && user?.id) {
       // Add a safety timeout to prevent infinite loops
       const safetyTimeout = setTimeout(() => {
-        console.log(
-          "Safety timeout triggered, forcing admin status to false to prevent infinite loop"
-        );
         setIsAdmin(false);
         setAdminStatusChecked(true);
       }, 10000); // 10 second safety timeout
@@ -220,7 +312,17 @@ export default function Home() {
       <div className="min-h-screen bg-gray-50 flex items-center justify-center">
         <div className="text-center">
           <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto"></div>
-          <p className="mt-4 text-gray-600">Loading...</p>
+          <p className="mt-4 text-gray-600">Initializing application...</p>
+          <p className="mt-2 text-sm text-gray-500">
+            This should only take a few seconds
+          </p>
+
+          {/* Loading timeout warning */}
+          <div className="mt-4 p-3 bg-yellow-50 border border-yellow-200 rounded-lg">
+            <p className="text-sm text-yellow-700">
+              If this takes longer than 5 seconds, please refresh the page
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -238,6 +340,10 @@ export default function Home() {
     } else {
       // Add digit to phone number
       setPhoneNumber((prev) => prev + digit);
+      // Clear any error messages when user starts typing
+      if (error) {
+        clearError();
+      }
     }
   };
 
@@ -250,11 +356,18 @@ export default function Home() {
   const handleHangup = () => {
     hangupCall();
     setPhoneNumber("");
+    setAutoRedirectCountdown(null);
+    // Explicitly clear error to ensure it's removed
+    clearError();
   };
 
   const handleClearNumber = () => {
     if (!isCallActive) {
       setPhoneNumber("");
+      // Clear any error messages when clearing the number
+      if (error) {
+        clearError();
+      }
     }
   };
 
@@ -266,170 +379,125 @@ export default function Home() {
 
   const handleRemoveCall = (timestamp: number) => {
     removeCall(timestamp);
+    // Clear error if this was the last call in history
+    if (callHistory.length <= 1) {
+      clearError();
+    }
   };
 
   const handleClearHistory = () => {
     clearHistory();
+    // Also clear any error messages when clearing history
+    clearError();
   };
 
   // Show calling screen when connecting OR when call is active
   if (isConnecting || isCallActive) {
     const callingComponent = (
-      <div className="w-full">
-        {/* User Info and Logout */}
+      <div className="w-full min-h-[600px] flex flex-col">
+        {/* User Info, Status Indicators, and Settings Row */}
         <div className="mb-4 flex justify-between items-center">
           <div className="text-sm text-gray-600">
             Welcome, {user.user_metadata?.full_name || user.email}
           </div>
-          <SettingsDropdown
-            onTestMicrophone={() => setShowAudioTest(true)}
-            onDebugAudio={debugAudioSetup}
-            onDTMFSettings={() => setShowDTMFSettings(true)}
-            onCallHistory={() => setShowCallHistory(true)}
-            onSignOut={signOut}
-            isAdmin={user?.email?.includes("admin") || isAdmin || false}
-          />
-        </div>
 
-        {/* Session Status Indicator */}
-        <div className="mb-4 flex justify-center">
-          <div className="inline-flex items-center px-3 py-1 rounded-full text-xs bg-blue-50 text-blue-700 border border-blue-200">
-            <svg
-              className="w-3 h-3 mr-1"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M10 18a8 8 0 100-16 8 8 0 000 16zm1-12a1 1 0 10-2 0v4a1 1 0 00.293.707l2.828 2.829a1 1 0 101.415-1.415L11 9.586V6z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Session Active - Auto-logout after 4 hours of inactivity
-          </div>
-        </div>
-
-        {/* Connection Status and Controls - All on one line */}
-        <div className="mb-4 flex items-center justify-center gap-3 flex-wrap">
-          {/* Connection Status */}
-          <div
-            className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-              isConnected
-                ? "bg-green-100 text-green-800"
-                : "bg-red-100 text-red-800"
-            }`}
-          >
+          <div className="flex items-center space-x-3">
+            {/* Connection Status Icon */}
             <div
-              className={`w-2 h-2 rounded-full mr-2 ${
-                isConnected ? "bg-green-500" : "bg-red-500"
-              }`}
-            ></div>
-            {isConnected ? "Connected" : "Disconnected"}
-          </div>
-
-          {/* Network Quality Status */}
-          {isConnected && (
-            <div
-              className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-                networkQuality === "excellent"
-                  ? "bg-green-100 text-green-800"
-                  : networkQuality === "good"
-                  ? "bg-blue-100 text-blue-800"
-                  : networkQuality === "fair"
-                  ? "bg-yellow-100 text-yellow-800"
-                  : "bg-red-100 text-red-800"
-              }`}
+              className="flex items-center space-x-1"
+              title={
+                isInitializing
+                  ? "Initializing..."
+                  : isConnected
+                  ? "Connected"
+                  : "Disconnected"
+              }
             >
               <div
-                className={`w-2 h-2 rounded-full mr-2 ${
-                  networkQuality === "excellent"
-                    ? "bg-green-500"
-                    : networkQuality === "good"
-                    ? "bg-blue-500"
-                    : networkQuality === "fair"
+                className={`w-2 h-2 rounded-full ${
+                  isInitializing
                     ? "bg-yellow-500"
+                    : isConnected
+                    ? "bg-green-500"
                     : "bg-red-500"
                 }`}
               ></div>
-              Network: {networkQuality}
+              <svg
+                className="w-4 h-4 text-gray-600"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M2.166 4.999A11.954 11.954 0 0010 1.944 11.954 11.954 0 0017.834 5c.11.65.166 1.32.166 2.001 0 5.225-3.34 9.67-8 11.317C5.34 16.67 2 12.225 2 7c0-.682.057-1.35.166-2.001zm11.541 3.708a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z"
+                  clipRule="evenodd"
+                />
+              </svg>
             </div>
-          )}
 
-          {/* Reconnection Status */}
-          {isReconnecting && (
-            <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-orange-100 text-orange-800">
-              <div className="w-2 h-2 bg-orange-500 rounded-full mr-2 animate-pulse"></div>
-              Reconnecting...
-            </div>
-          )}
-
-          {/* Microphone Status */}
-          <div
-            className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-              hasMicrophoneAccess
-                ? "bg-green-100 text-green-800"
-                : "bg-red-100 text-red-800"
-            }`}
-          >
+            {/* Microphone Status Icon */}
             <div
-              className={`w-2 h-2 rounded-full mr-2 ${
-                hasMicrophoneAccess ? "bg-green-500" : "bg-red-500"
-              }`}
-            ></div>
-            {hasMicrophoneAccess ? "Microphone Ready" : "Microphone Required"}
-          </div>
-
-          {/* Call Control Status */}
-          {callControlId && (
-            <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-blue-100 text-blue-800">
-              <div className="w-2 h-2 bg-blue-500 rounded-full mr-2 animate-pulse"></div>
-              Call Streaming Active
+              className="flex items-center space-x-1"
+              title={
+                hasMicrophoneAccess ? "Microphone Ready" : "Microphone Required"
+              }
+            >
+              <div
+                className={`w-2 h-2 rounded-full ${
+                  hasMicrophoneAccess ? "bg-green-500" : "bg-red-500"
+                }`}
+              ></div>
+              <svg
+                className="w-4 h-4 text-gray-600"
+                fill="currentColor"
+                viewBox="0 0 20 20"
+              >
+                <path
+                  fillRule="evenodd"
+                  d="M7 4a3 3 0 016 0v4a3 3 0 11-6 0V4zm4 10.93A7.001 7.001 0 0017 8a1 1 0 10-2 0A5 5 0 015 8a1 1 0 00-2 0 7.001 7.001 0 006 6.93V17H6a1 1 0 100 2h8a1 1 0 100-2h-3v-2.07z"
+                  clipRule="evenodd"
+                />
+              </svg>
             </div>
-          )}
+
+            <SettingsDropdown
+              onTestMicrophone={() => setShowAudioTest(true)}
+              onDebugAudio={debugAudioSetup}
+              onDTMFSettings={() => setShowDTMFSettings(true)}
+              onCallHistory={() => setShowCallHistory(true)}
+              onSignOut={signOut}
+              isAdmin={user?.email?.includes("admin") || isAdmin || false}
+            />
+          </div>
         </div>
 
         {/* Calling Screen */}
-        <CallingScreen
-          phoneNumber={phoneNumber}
-          onHangup={handleHangup}
-          error={error}
-          onReturnToDialPad={() => {
-            // Clear error and return to dial pad
-            hangupCall();
-            setPhoneNumber("");
-          }}
-          onRetry={() => {
-            // Retry the call with error recovery
-            if (phoneNumber) {
-              retryCall(phoneNumber, 3);
-            }
-          }}
-          isConnecting={isConnecting}
-          isCallActive={isCallActive}
-          callState={callState || ""}
-          callDuration={callDuration}
-        />
+        <div className="flex-1 flex flex-col">
+          <CallingScreen
+            phoneNumber={phoneNumber}
+            onHangup={handleHangup}
+            error={error}
+            onReturnToDialPad={() => {
+              // Clear error and return to dial pad
+              forceResetCallState();
 
-        {/* Debug Audio Button */}
-        <div className="mt-4 text-center">
-          <button
-            onClick={debugAudioSetup}
-            className="inline-flex items-center px-3 py-2 bg-yellow-500 hover:bg-yellow-600 text-white text-sm font-medium rounded-lg transition-colors"
-            title="Debug Audio Setup"
-          >
-            <svg
-              className="w-4 h-4 mr-2"
-              fill="currentColor"
-              viewBox="0 0 20 20"
-            >
-              <path
-                fillRule="evenodd"
-                d="M18 10a8 8 0 11-16 0 8 8 0 0116 0zm-7-4a1 1 0 11-2 0 1 1 0 012 0zM9 9a1 1 0 000 2v3a1 1 0 001 1h1a1 1 0 100-2v-3a1 1 0 00-1-1H9z"
-                clipRule="evenodd"
-              />
-            </svg>
-            Debug Audio
-          </button>
+              setPhoneNumber("");
+              setAutoRedirectCountdown(null);
+              // Explicitly clear error to ensure it's removed
+              clearError();
+            }}
+            onRetry={() => {
+              // Retry the call with error recovery
+              if (phoneNumber) {
+                retryCall(phoneNumber, 3);
+              }
+            }}
+            isConnecting={isConnecting}
+            isCallActive={isCallActive}
+            callState={callState || ""}
+            callDuration={callDuration}
+            autoRedirectCountdown={autoRedirectCountdown}
+          />
         </div>
       </div>
     );
@@ -448,7 +516,7 @@ export default function Home() {
   }
 
   const dialPadComponent = (
-    <div className="w-full">
+    <div className="w-full min-h-[600px] flex flex-col">
       {/* User Info, Status Indicators, and Settings Row */}
       <div className="mb-4 flex justify-between items-center">
         <div className="text-sm text-gray-600">
@@ -459,11 +527,21 @@ export default function Home() {
           {/* Connection Status Icon */}
           <div
             className="flex items-center space-x-1"
-            title={isConnected ? "Connected" : "Disconnected"}
+            title={
+              isInitializing
+                ? "Initializing..."
+                : isConnected
+                ? "Connected"
+                : "Disconnected"
+            }
           >
             <div
               className={`w-2 h-2 rounded-full ${
-                isConnected ? "bg-green-500" : "bg-red-500"
+                isInitializing
+                  ? "bg-yellow-500"
+                  : isConnected
+                  ? "bg-green-500"
+                  : "bg-red-500"
               }`}
             ></div>
             <svg
@@ -518,7 +596,35 @@ export default function Home() {
       {/* Error Display */}
       {error && (
         <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm text-center">
-          {error}
+          <div className="mb-2">{error}</div>
+
+          {/* Action buttons for different error types */}
+          <div className="flex gap-2 justify-center">
+            {/* Reconnection button for connection errors */}
+            {(!isConnected ||
+              error.includes("connection") ||
+              error.includes("reconnect")) && (
+              <button
+                onClick={triggerReconnection}
+                disabled={isReconnecting || isInitializing}
+                className="px-4 py-2 bg-blue-500 hover:bg-blue-600 disabled:bg-gray-400 text-white text-xs rounded-lg transition-colors"
+              >
+                {isReconnecting ? "Reconnecting..." : "Reconnect"}
+              </button>
+            )}
+
+            {/* Microphone retry button for microphone errors */}
+            {(!hasMicrophoneAccess ||
+              error.includes("microphone") ||
+              error.includes("Microphone")) && (
+              <button
+                onClick={retryMicrophoneAccess}
+                className="px-4 py-2 bg-green-500 hover:bg-green-600 text-white text-xs rounded-lg transition-colors"
+              >
+                Retry Microphone
+              </button>
+            )}
+          </div>
         </div>
       )}
 
@@ -570,31 +676,77 @@ export default function Home() {
           formatTimestamp={formatTimestamp}
         />
       ) : (
-        <>
+        <div className="flex-1 flex flex-col justify-between">
           {/* Dial Pad */}
-          <DialPad
-            phoneNumber={phoneNumber}
-            onDigitPress={handleDigitPress}
-            onCall={handleCall}
-            onHangup={handleHangup}
-            onClear={handleClearNumber}
-            isCallActive={isCallActive}
-            isConnecting={isConnecting}
-          />
+          <div className="flex-1 flex flex-col items-center justify-center">
+            <DialPad
+              phoneNumber={phoneNumber}
+              onDigitPress={handleDigitPress}
+              onCall={handleCall}
+              onHangup={handleHangup}
+              onClear={handleClearNumber}
+              isCallActive={isCallActive}
+              isConnecting={isConnecting}
+              isInitializing={isInitializing}
+              isConnected={isConnected}
+              hasMicrophoneAccess={hasMicrophoneAccess}
+            />
+          </div>
 
           {/* Instructions */}
-          <div className="mt-8 text-center text-sm text-gray-500">
-            {!isConnected && (
-              <p>
-                Configure your Telnyx credentials in .env.local to get started
+          <div className="text-center text-sm text-gray-500 py-4">
+            {isInitializing && (
+              <p className="text-yellow-600">
+                Initializing Telnyx connection...
               </p>
             )}
-            {isConnected && !isCallActive && (
-              <p>Enter a phone number and press Call</p>
+            {!isInitializing && !isConnected && (
+              <div className="space-y-2">
+                <p className="text-red-600 font-medium">Telnyx not connected</p>
+                {!hasAllCredentials ? (
+                  <div className="text-xs space-y-1">
+                    <p className="font-medium">
+                      Missing credentials in .env.local:
+                    </p>
+                    {!telnyxConfig.apiKey && (
+                      <p>• NEXT_PUBLIC_TELNYX_API_KEY</p>
+                    )}
+                    {!telnyxConfig.sipUsername && (
+                      <p>• NEXT_PUBLIC_TELNYX_SIP_USERNAME</p>
+                    )}
+                    {!telnyxConfig.sipPassword && (
+                      <p>• NEXT_PUBLIC_TELNYX_SIP_PASSWORD</p>
+                    )}
+                    {!telnyxConfig.phoneNumber && (
+                      <p>• NEXT_PUBLIC_TELNYX_PHONE_NUMBER</p>
+                    )}
+                  </div>
+                ) : (
+                  <p className="text-xs">
+                    Credentials found but connection failed. Check network and
+                    try reconnecting.
+                  </p>
+                )}
+              </div>
             )}
-            {isCallActive && <p>Use the dial pad to send DTMF tones</p>}
+            {!isInitializing && isConnected && !hasMicrophoneAccess && (
+              <div className="space-y-2">
+                <p className="text-red-600 font-medium">
+                  Microphone access required
+                </p>
+                <p className="text-xs">
+                  Please allow microphone permissions to make calls
+                </p>
+              </div>
+            )}
+
+            {isCallActive && (
+              <p className="text-green-600 font-medium">
+                Use the dial pad to send DTMF tones
+              </p>
+            )}
           </div>
-        </>
+        </div>
       )}
     </div>
   );
@@ -615,9 +767,9 @@ export default function Home() {
       {showDTMFSettings && (
         <DTMFSettings
           volume={0.3}
-          onVolumeChange={(volume) => console.log("Volume changed:", volume)}
+          onVolumeChange={(volume) => {}}
           enabled={true}
-          onToggleEnabled={() => console.log("Enabled toggled")}
+          onToggleEnabled={() => {}}
           onClose={() => setShowDTMFSettings(false)}
         />
       )}

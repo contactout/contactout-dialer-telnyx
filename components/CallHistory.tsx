@@ -16,9 +16,14 @@ const CallHistory: React.FC<CallHistoryProps> = ({
   onClearHistory,
   formatTimestamp,
 }) => {
+  console.log("CallHistory component received:", {
+    callHistory,
+    length: callHistory.length,
+  });
+
   if (callHistory.length === 0) {
     return (
-      <div className="text-center py-8 text-gray-500">
+      <div className="flex-1 flex flex-col items-center justify-center text-center py-8 text-gray-500">
         <svg
           className="w-12 h-12 mx-auto mb-4 text-gray-300"
           fill="currentColor"
@@ -95,7 +100,7 @@ const CallHistory: React.FC<CallHistoryProps> = ({
   };
 
   return (
-    <div className="space-y-4">
+    <div className="flex-1 flex flex-col justify-between space-y-4">
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">Call History</h3>
@@ -108,7 +113,7 @@ const CallHistory: React.FC<CallHistoryProps> = ({
       </div>
 
       {/* Call List */}
-      <div className="space-y-2 max-h-64 overflow-y-auto">
+      <div className="flex-1 space-y-2 overflow-y-auto min-h-0">
         {callHistory.map((call) => (
           <div
             key={call.timestamp}
