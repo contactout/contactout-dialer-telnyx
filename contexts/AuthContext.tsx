@@ -17,6 +17,7 @@ interface AuthContextType {
   user: User | null;
   session: Session | null;
   loading: boolean;
+  isAdmin: boolean;
   signInWithGoogle: () => Promise<void>;
   signOut: () => Promise<void>;
   authError: string | null;
@@ -34,6 +35,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   );
   const [sessionStartTime, setSessionStartTime] = useState<number | null>(null);
   const signOutRef = useRef<(() => Promise<void>) | null>(null);
+  const [hasInitialized, setHasInitialized] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+
+  // Debug logging for admin status changes
+  useEffect(() => {
+    console.log("AuthContext - isAdmin state changed to:", isAdmin);
+  }, [isAdmin]);
+
+  const lastProcessedEventRef = useRef<string | null>(null);
+  const subscriptionRef = useRef<any>(null);
+  const loadingTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const subscriptionCreatedRef = useRef<boolean>(false);
 
   // Session timeout duration (4 hours in milliseconds)
   const SESSION_TIMEOUT_DURATION = 4 * 60 * 60 * 1000; // 4 hours
@@ -44,6 +57,57 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       email.endsWith("@contactout.com") || email.endsWith("@contactout.io")
     );
   };
+
+  // Check if user should be allowed access (admin users bypass domain restrictions)
+  const shouldAllowAccess = async (
+    email: string,
+    userId: string
+  ): Promise<boolean> => {
+    try {
+      console.log(`Checking access for user: ${email} (${userId})`);
+
+      // Check if user is already an admin in our database
+      try {
+        const isAdmin = await DatabaseService.isUserAdmin(userId);
+        console.log(`Admin check result for ${userId}: ${isAdmin}`);
+
+        if (isAdmin) {
+          console.log(`User ${userId} is admin, allowing access`);
+          return true; // Admin users can always access
+        }
+      } catch (adminCheckError) {
+        console.warn(
+          "Admin check failed, falling back to domain check:",
+          adminCheckError
+        );
+      }
+
+      // For non-admin users, check domain restriction
+      const domainAllowed = isContactOutDomain(email);
+      console.log(`Domain check for ${email}: ${domainAllowed}`);
+
+      return domainAllowed;
+    } catch (error) {
+      console.error("Error in shouldAllowAccess:", error);
+      // Fall back to domain check if admin check fails
+      return isContactOutDomain(email);
+    }
+  };
+
+  // Check and cache admin status once during authentication
+  const checkAndCacheAdminStatus = useCallback(async (userId: string) => {
+    try {
+      const adminStatus = await DatabaseService.isUserAdmin(userId);
+      console.log(`Setting admin status to: ${adminStatus} for user ${userId}`);
+      setIsAdmin(adminStatus);
+      console.log(`Admin status cached for user ${userId}: ${adminStatus}`);
+      return adminStatus;
+    } catch (error) {
+      console.warn("Admin check failed:", error);
+      setIsAdmin(false);
+      return false;
+    }
+  }, []);
 
   // Reset session timeout
   const resetSessionTimeout = useCallback(() => {
@@ -76,13 +140,20 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
 
   useEffect(() => {
     // Set up loading timeout to prevent stuck loading screens
-    const loadingTimeout = setTimeout(() => {
-      if (loading) {
-        console.warn("Loading timeout reached, forcing loading state to false");
-        setLoading(false);
-        setAuthError("Loading timeout. Please refresh the page or try again.");
-      }
-    }, 3000); // 3 second timeout for faster loading
+    // Only start the timeout if we don't have a session yet
+    if (!session && !user) {
+      loadingTimeoutRef.current = setTimeout(() => {
+        if (loading) {
+          console.warn(
+            "Loading timeout reached, forcing loading state to false"
+          );
+          setLoading(false);
+          setAuthError(
+            "Loading timeout. Please refresh the page or try again."
+          );
+        }
+      }, 10000); // Increased to 10 seconds for authentication flow
+    }
 
     // Set up activity tracking event listeners
     const activityEvents = [
@@ -121,26 +192,124 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       return;
     }
 
-    // Get initial session
-    supabase.auth
-      .getSession()
-      .then(({ data: { session } }) => {
-        setSession(session);
-        setUser(session?.user ?? null);
-        setLoading(false);
-      })
-      .catch((error) => {
-        console.error("Supabase auth error:", error);
-        setLoading(false);
-      });
+    // Get initial session (only once)
+    if (!hasInitialized) {
+      setHasInitialized(true);
+      supabase.auth
+        .getSession()
+        .then(async ({ data: { session } }) => {
+          console.log(
+            "Initial session check result:",
+            session ? "Session found" : "No session"
+          );
+          if (session?.user?.email) {
+            console.log("Initial session user:", session.user.email);
 
-    // Listen for auth changes
-    const {
-      data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (event, session) => {
-      if (session?.user?.email) {
-        // Check if the user's email domain is allowed
-        if (!isContactOutDomain(session.user.email)) {
+            // Check admin status for initial session
+            if (session.user.id) {
+              console.log(
+                "Checking admin status for initial session user:",
+                session.user.id
+              );
+              const adminStatus = await checkAndCacheAdminStatus(
+                session.user.id
+              );
+              console.log("Initial session admin status:", adminStatus);
+              setIsAdmin(adminStatus);
+            }
+          }
+          setSession(session);
+          setUser(session?.user ?? null);
+          setLoading(false);
+
+          // Clear loading timeout if we got a session
+          if (session && loadingTimeoutRef.current) {
+            clearTimeout(loadingTimeoutRef.current);
+          }
+        })
+        .catch((error) => {
+          console.error("Supabase auth error:", error);
+          setLoading(false);
+        });
+    }
+
+    // Listen for auth changes - only create subscription once
+    if (!subscriptionCreatedRef.current) {
+      const {
+        data: { subscription },
+      } = supabase.auth.onAuthStateChange(async (event, session) => {
+        console.log(
+          `=== AUTH STATE CHANGE: ${event} ===`,
+          session ? `for user ${session.user.email}` : "no session"
+        );
+
+        // Skip if this is not a real auth change (avoid duplicate processing)
+        const eventKey = `${event}-${session?.user?.id || "no-user"}`;
+        if (lastProcessedEventRef.current === eventKey) {
+          console.log(`Skipping duplicate event: ${eventKey}`);
+          return;
+        }
+        lastProcessedEventRef.current = eventKey;
+
+        if (session?.user?.email) {
+          console.log(
+            `Auth state change: ${event} for user ${session.user.email}`
+          );
+
+          // Clear loading timeout since we have a user
+          if (loadingTimeoutRef.current) {
+            clearTimeout(loadingTimeoutRef.current);
+          }
+
+          // Create or update user record in our users table FIRST
+          try {
+            await DatabaseService.createOrUpdateUser({
+              id: session.user.id,
+              email: session.user.email,
+              full_name: session.user.user_metadata?.full_name || null,
+            });
+            console.log(
+              `User record created/updated for ${session.user.email}`
+            );
+          } catch (error) {
+            console.error("Failed to create/update user record:", error);
+            // Don't block login if user creation fails
+          }
+
+          // Check and cache admin status once
+          console.log("About to check admin status for user:", session.user.id);
+          const adminStatus = await checkAndCacheAdminStatus(session.user.id);
+          console.log("Admin status check result:", adminStatus);
+
+          // Set the admin status in state
+          setIsAdmin(adminStatus);
+          console.log("Setting isAdmin state to:", adminStatus);
+
+          // Grant access based on admin status or ContactOut domain
+          console.log(
+            "Checking access - adminStatus:",
+            adminStatus,
+            "isContactOut:",
+            isContactOutDomain(session.user.email)
+          );
+          if (adminStatus || isContactOutDomain(session.user.email)) {
+            console.log(
+              `Access granted for ${
+                session.user.email
+              } (Admin: ${adminStatus}, ContactOut: ${isContactOutDomain(
+                session.user.email
+              )})`
+            );
+            setAuthError(null);
+            resetSessionTimeout();
+            setSession(session);
+            setUser(session.user);
+            setLoading(false);
+            return;
+          }
+
+          // Final fallback - deny access
+          console.log(`Access denied for ${session.user.email}, signing out`);
           setAuthError("Access restricted to ContactOut domain emails only.");
           // Sign out the user immediately
           await supabase.auth.signOut();
@@ -150,33 +319,33 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           return;
         }
 
-        // Create or update user record in our users table
-        try {
-          await DatabaseService.createOrUpdateUser({
-            id: session.user.id,
-            email: session.user.email,
-            full_name: session.user.user_metadata?.full_name || null,
-          });
-        } catch (error) {
-          console.error("Failed to create/update user record:", error);
-          // Don't block login if user creation fails
-        }
+        // No session - clear loading state
+        setSession(session);
+        setUser(session?.user ?? null);
+        setLoading(false);
+      });
 
-        // Clear any previous auth errors for valid users
-        setAuthError(null);
+      // Store the subscription for cleanup
+      subscriptionRef.current = subscription;
+      subscriptionCreatedRef.current = true;
+    }
 
-        // Set up session timeout for new login
-        resetSessionTimeout();
+    // Safety mechanism: ensure loading state is cleared after a reasonable time
+    const safetyTimeout = setTimeout(() => {
+      if (loading) {
+        console.warn("Safety timeout: forcing loading state to false");
+        setLoading(false);
       }
-
-      setSession(session);
-      setUser(session?.user ?? null);
-      setLoading(false);
-    });
+    }, 15000); // 15 seconds safety timeout
 
     return () => {
+      // Clean up safety timeout
+      clearTimeout(safetyTimeout);
+
       // Clean up loading timeout
-      clearTimeout(loadingTimeout);
+      if (loadingTimeoutRef.current) {
+        clearTimeout(loadingTimeoutRef.current);
+      }
 
       // Clean up event listeners
       activityEvents.forEach((event) => {
@@ -184,14 +353,16 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       });
 
       // Clean up subscription
-      subscription.unsubscribe();
+      if (subscriptionRef.current) {
+        subscriptionRef.current.unsubscribe();
+      }
 
       // Clean up session timeout
       if (sessionTimeout) {
         clearTimeout(sessionTimeout);
       }
     };
-  }, [sessionTimeout, trackUserActivity, resetSessionTimeout]);
+  }, [sessionTimeout, trackUserActivity, resetSessionTimeout, hasInitialized]);
 
   const signInWithGoogle = async () => {
     const { error } = await supabase.auth.signInWithOAuth({
@@ -206,18 +377,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   };
 
   const signOut = async () => {
+    console.log("Signing out user...");
+
     // Clear session timeout
     if (sessionTimeout) {
       clearTimeout(sessionTimeout);
       setSessionTimeout(null);
     }
 
+    // Clear all auth state
+    setSession(null);
+    setUser(null);
+    setIsAdmin(false);
+    setLoading(false);
+    setAuthError(null);
+
+    // Sign out from Supabase
     const { error } = await supabase.auth.signOut();
     if (error) {
       console.error("Error signing out:", error.message);
+    } else {
+      console.log("User signed out successfully");
     }
-    // Clear auth error on sign out
-    setAuthError(null);
   };
 
   // Store signOut function in ref for use in timeouts
@@ -229,6 +410,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     user,
     session,
     loading,
+    isAdmin,
     signInWithGoogle,
     signOut,
     authError,

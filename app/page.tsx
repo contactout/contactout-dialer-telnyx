@@ -21,8 +21,6 @@ export default function Home() {
   const [showAudioTest, setShowAudioTest] = useState(false);
   const [showDTMFSettings, setShowDTMFSettings] = useState(false);
   const [showCallHistory, setShowCallHistory] = useState(false);
-  const [isAdmin, setIsAdmin] = useState(false);
-  const [adminStatusChecked, setAdminStatusChecked] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
   const previousUserIdRef = useRef<string | null>(null);
   const [callDuration, setCallDuration] = useState(0);
@@ -32,7 +30,16 @@ export default function Home() {
   const [showErrorPopup, setShowErrorPopup] = useState(false);
   const [errorMessage, setErrorMessage] = useState("");
   const { isMobile } = useDeviceDetection();
-  const { user, loading, signOut, session } = useAuth();
+  const { user, loading, signOut, session, isAdmin } = useAuth();
+
+  // Debug logging for admin status
+  useEffect(() => {
+    console.log("Main page - Admin status changed:", {
+      isAdmin,
+      userEmail: user?.email,
+      userId: user?.id,
+    });
+  }, [isAdmin, user]);
 
   // Call history hook
   const {
@@ -165,94 +172,6 @@ export default function Home() {
     }
   }, [callState]);
 
-  // Check admin status when user changes
-  useEffect(() => {
-    let isMounted = true;
-    let adminCheckTimeout: NodeJS.Timeout | null = null;
-    const currentUserId = user?.id;
-
-    const checkAdminStatus = async () => {
-      if (!user || !isMounted || adminStatusChecked) return;
-
-      // Prevent multiple simultaneous admin checks
-      if (adminCheckTimeout) {
-        return;
-      }
-
-      try {
-        // Set a timeout to prevent rapid repeated calls
-        adminCheckTimeout = setTimeout(() => {
-          adminCheckTimeout = null;
-        }, 5000); // 5 second cooldown
-
-        const adminStatus = await DatabaseService.isUserAdmin(user.id);
-
-        if (isMounted) {
-          // Only update admin status if it's different from current
-          // This prevents unnecessary state changes that could trigger re-renders
-          if (adminStatus !== isAdmin) {
-            setIsAdmin(adminStatus);
-          }
-          setAdminStatusChecked(true); // Mark as checked to prevent repeated calls
-        }
-      } catch (error) {
-        if (isMounted) {
-          console.error("Error checking admin status:", error);
-          // Fallback to email-based admin check
-          const fallbackAdmin = user.email?.includes("admin") || false;
-          // Only update admin status if it's different from current
-          if (fallbackAdmin !== isAdmin) {
-            setIsAdmin(fallbackAdmin);
-          }
-          setAdminStatusChecked(true); // Mark as checked even on error
-
-          // If it's a network error, set a longer cooldown
-          if (
-            error instanceof Error &&
-            error.message.includes("Failed to fetch")
-          ) {
-            // Set a longer cooldown for network errors to prevent infinite loops
-            setTimeout(() => {
-              setAdminStatusChecked(false);
-            }, 60000); // 1 minute cooldown for network errors
-          }
-        }
-      } finally {
-        // Clear the timeout
-        if (adminCheckTimeout) {
-          clearTimeout(adminCheckTimeout);
-          adminCheckTimeout = null;
-        }
-      }
-    };
-
-    // Only check admin status if we have a user and haven't checked recently
-    if (user && user.id && !adminStatusChecked) {
-      checkAdminStatus();
-    } else if (!user && !session) {
-      // Only reset admin status when user is completely logged out
-      // Check both user and session to ensure we're really logged out
-      setIsAdmin(false);
-      setAdminStatusChecked(false);
-      previousUserIdRef.current = null;
-    }
-
-    // Track user ID changes to prevent unnecessary admin status resets
-    if (user?.id !== previousUserIdRef.current) {
-      previousUserIdRef.current = user?.id || null;
-    }
-
-    // Don't reset admin status if user is still logged in but user object changes
-    // This prevents admin status from being reset during auth state updates
-
-    return () => {
-      isMounted = false;
-      if (adminCheckTimeout) {
-        clearTimeout(adminCheckTimeout);
-      }
-    };
-  }, [user?.id, adminStatusChecked]); // Include adminStatusChecked in dependencies
-
   // Auto-return logic removed - now handled by error popup with user control
 
   // Update call duration when call is active
@@ -276,20 +195,6 @@ export default function Home() {
   }, [isCallActive, callStartTime]);
 
   // Monitor network quality and apply graceful degradation
-
-  // Global error boundary for admin status checking
-  useEffect(() => {
-    // If we've had multiple failed admin checks, disable them temporarily
-    if (adminStatusChecked === false && user?.id) {
-      // Add a safety timeout to prevent infinite loops
-      const safetyTimeout = setTimeout(() => {
-        setIsAdmin(false);
-        setAdminStatusChecked(true);
-      }, 10000); // 10 second safety timeout
-
-      return () => clearTimeout(safetyTimeout);
-    }
-  }, [adminStatusChecked, user?.id]);
 
   // Show loading spinner while checking auth
   if (loading) {
@@ -476,9 +381,8 @@ export default function Home() {
               onTestMicrophone={() => setShowAudioTest(true)}
               onDebugAudio={debugAudioSetup}
               onDTMFSettings={() => setShowDTMFSettings(true)}
-              onCallHistory={() => setShowCallHistory(true)}
               onSignOut={signOut}
-              isAdmin={user?.email?.includes("admin") || isAdmin || false}
+              isAdmin={isAdmin}
             />
           </div>
         </div>
@@ -602,9 +506,8 @@ export default function Home() {
             onTestMicrophone={() => setShowAudioTest(true)}
             onDebugAudio={debugAudioSetup}
             onDTMFSettings={() => setShowDTMFSettings(true)}
-            onCallHistory={() => setShowCallHistory(true)}
             onSignOut={signOut}
-            isAdmin={user?.email?.includes("admin") || isAdmin || false}
+            isAdmin={isAdmin}
           />
         </div>
       </div>

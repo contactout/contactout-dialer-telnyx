@@ -1,4 +1,5 @@
 // Telnyx Call Cost Calculator
+// Hybrid approach: Real-time API pricing with fallback to hardcoded rates
 // Based on pricing from: https://telnyx.com/pricing/call-control
 
 export interface CallCostBreakdown {
@@ -7,6 +8,7 @@ export interface CallCostBreakdown {
   sipTrunkingCost: number;
   totalCost: number;
   currency: string;
+  pricingSource: "api" | "fallback" | "unknown";
 }
 
 export interface TelnyxPricing {
@@ -15,15 +17,23 @@ export interface TelnyxPricing {
   currency: string;
 }
 
+export interface TelnyxApiPricing {
+  country_code: string;
+  voice_per_minute: number;
+  sip_trunking_per_minute: number;
+  currency: string;
+  last_updated: string;
+}
+
 export class TelnyxCostCalculator {
-  // Base Telnyx pricing (as of 2025)
+  // Base Telnyx pricing (fallback rates - updated quarterly)
   private static readonly BASE_PRICING: TelnyxPricing = {
     voicePerMinute: 0.002, // $0.002 per minute
     sipTrunkingPerMinute: 0.001, // Estimated average SIP trunking cost
     currency: "USD",
   };
 
-  // Regional SIP trunking costs (estimated - actual costs may vary)
+  // Regional SIP trunking costs (fallback rates - updated quarterly)
   private static readonly REGIONAL_SIP_COSTS: Record<string, number> = {
     US: 0.0005, // US domestic
     CA: 0.0008, // Canada
@@ -37,8 +47,92 @@ export class TelnyxCostCalculator {
     DEFAULT: 0.001, // Default for other regions
   };
 
+  // Cache for API pricing to avoid repeated calls
+  private static pricingCache: Map<string, TelnyxApiPricing> = new Map();
+  private static cacheExpiry: Map<string, number> = new Map();
+  private static readonly CACHE_DURATION = 24 * 60 * 60 * 1000; // 24 hours
+
   /**
-   * Calculate call cost based on duration and destination
+   * Fetch real-time pricing from Telnyx API (if available)
+   * @param countryCode - Country code (e.g., 'US', 'CA')
+   * @returns Promise<TelnyxApiPricing | null>
+   */
+  static async fetchTelnyxPricing(
+    countryCode: string
+  ): Promise<TelnyxApiPricing | null> {
+    try {
+      // Check cache first
+      const cached = this.pricingCache.get(countryCode);
+      const expiry = this.cacheExpiry.get(countryCode);
+
+      if (cached && expiry && Date.now() < expiry) {
+        return cached;
+      }
+
+      // Fetch from Telnyx API (this would be implemented when API is available)
+      // For now, return null to use fallback pricing
+      // const response = await fetch(`https://api.telnyx.com/v2/pricing/voice/${countryCode}`);
+      // const data = await response.json();
+
+      // Cache the result
+      // this.pricingCache.set(countryCode, data);
+      // this.cacheExpiry.set(countryCode, Date.now() + this.CACHE_DURATION);
+
+      return null; // API not implemented yet
+    } catch (error) {
+      console.warn(`Failed to fetch Telnyx pricing for ${countryCode}:`, error);
+      return null;
+    }
+  }
+
+  /**
+   * Calculate call cost based on duration and destination using hybrid pricing
+   * @param durationMinutes - Call duration in minutes
+   * @param destinationCountry - Country code for destination (optional)
+   * @returns CallCostBreakdown with detailed cost information
+   */
+  static async calculateCallCostHybrid(
+    durationMinutes: number,
+    destinationCountry?: string
+  ): Promise<CallCostBreakdown> {
+    // Ensure duration is positive
+    const minutes = Math.max(0, durationMinutes);
+
+    // Try to get real-time pricing first
+    let pricingSource: "api" | "fallback" | "unknown" = "unknown";
+    let voicePerMinute = this.BASE_PRICING.voicePerMinute;
+    let sipPerMinute = this.getSipTrunkingCost(destinationCountry);
+
+    if (destinationCountry) {
+      const apiPricing = await this.fetchTelnyxPricing(destinationCountry);
+      if (apiPricing) {
+        voicePerMinute = apiPricing.voice_per_minute;
+        sipPerMinute = apiPricing.sip_trunking_per_minute;
+        pricingSource = "api";
+      } else {
+        pricingSource = "fallback";
+      }
+    } else {
+      pricingSource = "fallback";
+    }
+
+    // Calculate costs
+    const voiceCost = minutes * voicePerMinute;
+    const sipTrunkingCost = minutes * sipPerMinute;
+    const totalCost = voiceCost + sipTrunkingCost;
+
+    return {
+      voiceMinutes: minutes,
+      voiceCost: this.roundTo4Decimals(voiceCost),
+      sipTrunkingCost: this.roundTo4Decimals(sipTrunkingCost),
+      totalCost: this.roundTo4Decimals(totalCost),
+      currency: this.BASE_PRICING.currency,
+      pricingSource,
+    };
+  }
+
+  /**
+   * Calculate call cost based on duration and destination (legacy method)
    * @param durationMinutes - Call duration in minutes
    * @param destinationCountry - Country code for destination (optional)
    * @returns CallCostBreakdown with detailed cost information
@@ -61,9 +155,10 @@ export class TelnyxCostCalculator {
     return {
       voiceMinutes: minutes,
       voiceCost: this.roundTo4Decimals(voiceCost),
-      sipTrunkingCost: this.roundTo4Decimals(sipTrunkingCost),
+      sipTrunkingCost: this.roundTo4Decimals(sipCost),
       totalCost: this.roundTo4Decimals(totalCost),
       currency: this.BASE_PRICING.currency,
+      pricingSource: "fallback",
     };
   }
 
@@ -79,6 +174,20 @@ export class TelnyxCostCalculator {
   ): CallCostBreakdown {
     const durationMinutes = durationSeconds / 60;
     return this.calculateCallCost(durationMinutes, destinationCountry);
+  }
+
+  /**
+   * Calculate cost for a completed call with duration using hybrid pricing
+   * @param durationSeconds - Call duration in seconds
+   * @param destinationCountry - Country code for destination (optional)
+   * @returns Promise<CallCostBreakdown>
+   */
+  static async calculateCompletedCallCostHybrid(
+    durationSeconds: number,
+    destinationCountry?: string
+  ): Promise<CallCostBreakdown> {
+    const durationMinutes = durationSeconds / 60;
+    return this.calculateCallCostHybrid(durationMinutes, destinationCountry);
   }
 
   /**
@@ -99,6 +208,7 @@ export class TelnyxCostCalculator {
       sipTrunkingCost: this.roundTo4Decimals(sipCost * 0.1), // 10% of 1 minute cost
       totalCost: this.roundTo4Decimals(sipCost * 0.1),
       currency: this.BASE_PRICING.currency,
+      pricingSource: "fallback",
     };
   }
 

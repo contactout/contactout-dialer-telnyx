@@ -117,14 +117,59 @@ export class DatabaseService {
         .eq("id", userId);
 
       if (error) throw error;
+
+      // Clear admin check cache for this user
+      const cacheKey = `admin_check_${userId}`;
+      this.adminCheckCache.delete(cacheKey);
+
+      console.log(`User ${userId} has been set as admin`);
     } catch (error) {
       console.error("Error setting user as admin:", error);
       throw error;
     }
   }
 
+  // Test method to check if a user can be made admin
+  static async testAdminAccess(userId: string): Promise<{
+    canAccess: boolean;
+    currentRole: string | null;
+    email: string | null;
+    error?: string;
+  }> {
+    try {
+      const userDetails = await this.getUserDetails(userId);
+
+      if (!userDetails) {
+        return {
+          canAccess: false,
+          currentRole: null,
+          email: null,
+          error: "User not found in database",
+        };
+      }
+
+      const isAdmin = await this.isUserAdmin(userId);
+
+      return {
+        canAccess: isAdmin,
+        currentRole: userDetails.role,
+        email: userDetails.email,
+        error: isAdmin ? undefined : "User does not have admin privileges",
+      };
+    } catch (error) {
+      return {
+        canAccess: false,
+        currentRole: null,
+        email: null,
+        error: `Error checking admin access: ${error}`,
+      };
+    }
+  }
+
   // Check if user is admin
   static async isUserAdmin(userId: string): Promise<boolean> {
+    console.log(`DatabaseService.isUserAdmin called for userId: ${userId}`);
+
     // Clean up old cache entries periodically
     this.cleanupCache();
 
@@ -152,6 +197,11 @@ export class DatabaseService {
         .eq("id", userId)
         .single();
 
+      console.log(`Database query result for userId ${userId}:`, {
+        userData,
+        userError,
+      });
+
       if (userError) {
         console.warn(
           "Database query failed for admin check:",
@@ -168,6 +218,7 @@ export class DatabaseService {
 
       // Check if user has admin role
       if (userData?.role === "admin") {
+        console.log(`User ${userId} has admin role: true`);
         this.adminCheckCache.set(cacheKey, {
           result: true,
           timestamp: now,
@@ -178,6 +229,9 @@ export class DatabaseService {
 
       // Fallback: check if email contains 'admin' (for backward compatibility)
       const result = userData?.email?.includes("admin") || false;
+      console.log(
+        `User ${userId} admin check result (email fallback): ${result}`
+      );
 
       // Cache successful result
       this.adminCheckCache.set(cacheKey, {
@@ -528,6 +582,87 @@ export class DatabaseService {
       console.log("Required tables: users, calls");
     } catch (error) {
       console.error("Error initializing tables:", error);
+    }
+  }
+
+  // Get user details including role for debugging
+  static async getUserDetails(userId: string): Promise<{
+    id: string;
+    email: string;
+    role: string;
+    full_name?: string;
+    created_at: string;
+    last_active: string;
+  } | null> {
+    try {
+      const { data, error } = await supabase
+        .from("users")
+        .select("id, email, role, full_name, created_at, last_active")
+        .eq("id", userId)
+        .single();
+
+      if (error) {
+        console.error("Error fetching user details:", error);
+        return null;
+      }
+
+      return data;
+    } catch (error) {
+      console.error("Error in getUserDetails:", error);
+      return null;
+    }
+  }
+
+  // Debug method to check user's admin status with detailed logging
+  static async debugAdminStatus(userId: string): Promise<{
+    isAdmin: boolean;
+    reason: string;
+    userDetails: any;
+    cacheInfo: any;
+  }> {
+    const cacheKey = `admin_check_${userId}`;
+    const cacheEntry = this.adminCheckCache.get(cacheKey);
+
+    try {
+      const userDetails = await this.getUserDetails(userId);
+      const isAdmin = await this.isUserAdmin(userId);
+
+      let reason = "Unknown";
+      if (userDetails?.role === "admin") {
+        reason = "User has admin role in database";
+      } else if (userDetails?.email?.toLowerCase().includes("admin")) {
+        reason = "User email contains 'admin' (fallback method)";
+      } else {
+        reason = "User is not admin";
+      }
+
+      return {
+        isAdmin,
+        reason,
+        userDetails,
+        cacheInfo: cacheEntry
+          ? {
+              cached: true,
+              timestamp: cacheEntry.timestamp,
+              failed: cacheEntry.failed,
+              age: Date.now() - cacheEntry.timestamp,
+            }
+          : { cached: false },
+      };
+    } catch (error) {
+      return {
+        isAdmin: false,
+        reason: `Error occurred: ${error}`,
+        userDetails: null,
+        cacheInfo: cacheEntry
+          ? {
+              cached: true,
+              timestamp: cacheEntry.timestamp,
+              failed: cacheEntry.failed,
+              age: Date.now() - cacheEntry.timestamp,
+            }
+          : { cached: false },
+      };
     }
   }
 
