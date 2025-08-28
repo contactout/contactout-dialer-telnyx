@@ -878,7 +878,7 @@ export default function AdminPage() {
                         No calls found
                       </h3>
                       <p className="mt-1 text-sm text-gray-500">
-                        This user hasn't made any calls yet.
+                        This user hasn&apos;t made any calls yet.
                       </p>
                     </div>
                   ) : (

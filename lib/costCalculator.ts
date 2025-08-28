@@ -288,6 +288,7 @@ export class TelnyxCostCalculator {
         sipTrunkingCost: acc.sipTrunkingCost + call.sipTrunkingCost,
         totalCost: acc.totalCost + call.totalCost,
         currency: call.currency,
+        pricingSource: call.pricingSource, // Preserve pricing source from first call
       }),
       {
         voiceMinutes: 0,
@@ -295,6 +296,7 @@ export class TelnyxCostCalculator {
         sipTrunkingCost: 0,
         totalCost: 0,
         currency: "USD",
+        pricingSource: "unknown" as const,
       }
     );
 
@@ -304,6 +306,7 @@ export class TelnyxCostCalculator {
       sipTrunkingCost: this.roundTo4Decimals(total.sipTrunkingCost),
       totalCost: this.roundTo4Decimals(total.totalCost),
       currency: total.currency,
+      pricingSource: total.pricingSource,
     };
   }
 }

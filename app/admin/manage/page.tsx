@@ -322,10 +322,10 @@ export default function AdminManagePage() {
             </p>
             <div className="mt-2 p-3 bg-blue-50 border border-blue-200 rounded-md">
               <p className="text-xs text-blue-800">
-                <strong>Note:</strong> You can toggle user roles between "User"
-                and "Admin". Admin users can access the admin dashboard and
-                manage other users. User accounts cannot be deleted - only their
-                roles can be modified.
+                <strong>Note:</strong> You can toggle user roles between
+                &quot;User&quot; and &quot;Admin&quot;. Admin users can access
+                the admin dashboard and manage other users. User accounts cannot
+                be deleted - only their roles can be modified.
               </p>
             </div>
           </div>

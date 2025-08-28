@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from "react";
+import React, { useState, useEffect, useCallback } from "react";
 import { supabase } from "@/lib/supabase";
 import { TelnyxCostCalculator } from "@/lib/costCalculator";
 
@@ -42,14 +42,7 @@ const CallCostHistory: React.FC<CallCostHistoryProps> = ({
     totalCost: 0,
   });
 
-  useEffect(() => {
-    if (isVisible) {
-      fetchCallCosts();
-      fetchUsers();
-    }
-  }, [isVisible]);
-
-  const fetchCallCosts = async () => {
+  const fetchCallCosts = useCallback(async () => {
     try {
       setLoading(true);
       setError(null);
@@ -70,9 +63,9 @@ const CallCostHistory: React.FC<CallCostHistoryProps> = ({
     } finally {
       setLoading(false);
     }
-  };
+  }, []);
 
-  const fetchUsers = async () => {
+  const fetchUsers = useCallback(async () => {
     try {
       const { data, error } = await supabase
         .from("users")
@@ -90,7 +83,14 @@ const CallCostHistory: React.FC<CallCostHistoryProps> = ({
       console.error("Error fetching users:", err);
       // Don't set error for users - we can still show call costs
     }
-  };
+  }, []);
+
+  useEffect(() => {
+    if (isVisible) {
+      fetchCallCosts();
+      fetchUsers();
+    }
+  }, [isVisible, fetchCallCosts, fetchUsers]);
 
   const calculateTotalCosts = (calls: CallCostRecord[]) => {
     const totals = calls.reduce(
