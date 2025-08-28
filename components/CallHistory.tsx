@@ -16,11 +16,6 @@ const CallHistory: React.FC<CallHistoryProps> = ({
   onClearHistory,
   formatTimestamp,
 }) => {
-  console.log("CallHistory component received:", {
-    callHistory,
-    length: callHistory.length,
-  });
-
   if (callHistory.length === 0) {
     return (
       <div className="flex-1 flex flex-col items-center justify-center text-center py-8 text-gray-500">

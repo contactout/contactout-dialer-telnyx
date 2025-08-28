@@ -38,6 +38,16 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   const intervalRef = useRef<NodeJS.Timeout | null>(null);
 
   useEffect(() => {
+    // Only play ringtone when actually ringing, not when failing
+    if (
+      error ||
+      !isConnecting ||
+      callState === "failed" ||
+      callState === "error"
+    ) {
+      return;
+    }
+
     // Create audio context and start ringtone
     const startRingtone = () => {
       try {
@@ -104,7 +114,7 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
         audioContextRef.current = null;
       }
     };
-  }, []);
+  }, [error, isConnecting, callState]);
 
   // Get simplified status text
   const getStatusText = () => {
@@ -119,7 +129,7 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   };
 
   return (
-    <div className="w-full max-w-sm mx-auto text-center">
+    <div className="w-full max-w-sm mx-auto text-center flex flex-col justify-center min-h-[600px]">
       {/* Error Display */}
       {error && (
         <div className="mb-6 p-4 bg-red-100 border border-red-300 rounded-lg text-red-700">

@@ -62,7 +62,10 @@ interface UseTelnyxWebRTCReturn {
   // Utility functions
   clearError: () => void;
   forceResetCallState: () => void;
+  completeCallFailure: () => void;
   debugAudioSetup: () => void;
+  triggerReconnection: () => void;
+  retryMicrophoneAccess: () => void;
 }
 
 // ============================================================================
@@ -392,18 +395,67 @@ export const useTelnyxWebRTC = (
   // ============================================================================
 
   const trackCall = useCallback(
-    (call: any, status: "completed" | "failed", duration?: number) => {
+    (
+      call: any,
+      status: "completed" | "failed",
+      duration?: number,
+      phoneNumberOverride?: string
+    ) => {
       if (!userId) return;
+
+      // Get the actual phone number that was dialed
+      // The call object might not have phoneNumber, so we need to get it from the current call state
+      // Also allow phoneNumberOverride for cases where we know the number but the call object doesn't have it
+      const phoneNumber =
+        phoneNumberOverride ||
+        call.phoneNumber ||
+        currentCall?.phoneNumber ||
+        config.phoneNumber;
+
+      // Debug: Log the call object and tracking data
+      console.log("Tracking call to database:", {
+        call,
+        status,
+        duration,
+        userId,
+        phoneNumber,
+        callControlId: call.call_control_id,
+        callId: call.id,
+        currentCall: currentCall,
+        callProperties: {
+          hasPhoneNumber: !!call.phoneNumber,
+          hasCallControlId: !!call.call_control_id,
+          hasCallId: !!call.id,
+          callState: call.state,
+          callKeys: Object.keys(call || {}),
+        },
+      });
+
+      console.log("Calling DatabaseService.trackCall with:", {
+        user_id: userId,
+        phone_number: phoneNumber,
+        status,
+        call_control_id: call.id || call.call_control_id,
+        duration,
+        callId: call.id,
+        callState: call.state,
+      });
 
       DatabaseService.trackCall({
         user_id: userId,
-        phone_number: call.phoneNumber || config.phoneNumber,
+        phone_number: phoneNumber,
         status,
-        call_control_id: call.call_control_id,
+        call_control_id: call.id || call.call_control_id, // Use call.id as fallback
         duration,
-      });
+      })
+        .then(() => {
+          console.log("DatabaseService.trackCall completed successfully");
+        })
+        .catch((error) => {
+          console.error("DatabaseService.trackCall failed:", error);
+        });
     },
-    [userId, config.phoneNumber]
+    [userId, config.phoneNumber, currentCall]
   );
 
   const notifyCallStatus = useCallback(
@@ -483,137 +535,107 @@ export const useTelnyxWebRTC = (
         transitionCallState("idle");
       });
 
-      // Call events
+      // Call events - PRIMARY CALL HANDLER (replaces call.on() events)
       telnyxClient.on("call", (call: any) => {
-        if (call.state) {
+        console.log("📞 Telnyx client call event received:", call.state);
+
+        // PRIMARY CALL HANDLER - This is now our main way to handle calls
+        if (call && call.state) {
+          const currentTime = Date.now();
+          // Use currentCall's start time if available, otherwise estimate
+          const callDuration =
+            currentCall && callStartTime
+              ? (currentTime - callStartTime) / 1000
+              : 0;
+
+          console.log("📞 Primary call handler:", {
+            callId: call.id,
+            state: call.state,
+            callDuration: callDuration.toFixed(1) + "s",
+            callState,
+            isConnecting,
+          });
+
+          // IMMEDIATE FAILURE DETECTION - Handle quick failures first
+          if (
+            (call.state === "hangup" || call.state === "destroy") &&
+            (callState === "connecting" || callState === "trying")
+          ) {
+            if (callDuration < 2) {
+              console.log("🚨 IMMEDIATE FAILURE DETECTED via primary handler");
+              setError(
+                "Call failed - Invalid phone number or number not reachable"
+              );
+              transitionCallState("idle", call);
+
+              // Log call to Supabase
+              trackCall(
+                call,
+                "failed",
+                Math.floor(callDuration),
+                call.phoneNumber || config.phoneNumber
+              );
+
+              // Notify status
+              notifyCallStatus(
+                "failed",
+                call.phoneNumber || config.phoneNumber
+              );
+
+              // Clean up call state immediately
+              setCurrentCall(null);
+              setCallControlId(null);
+              setCallStartTime(null);
+              return;
+            }
+          }
+
+          // Handle all state transitions
           switch (call.state) {
-            case "ringing":
-              transitionCallState("ringing", call);
-              break;
-            case "answered":
-              transitionCallState("answered", call);
-              break;
-            case "ended":
-            case "hangup":
-            case "destroy":
-              transitionCallState("ended", call);
-              break;
-            default:
-              if (call.state.includes("fail") || call.state.includes("error")) {
-                transitionCallState("failed", call);
-                setError(`Call failed: ${call.state}`);
+            case "requesting":
+              if (callState !== "connecting") {
+                console.log("📞 Call requesting -> connecting");
+                transitionCallState("connecting", call);
               }
+              break;
+
+            case "trying":
+              if (callState !== "trying") {
+                console.log("📞 Call trying -> trying");
+                transitionCallState("trying", call);
+              }
+              break;
+
+            case "ringing":
+              if (callState !== "ringing") {
+                console.log("📞 Call ringing -> ringing");
+                transitionCallState("ringing", call);
+              }
+              break;
+
+            case "answered":
+              if (callState !== "answered") {
+                console.log("📞 Call answered -> answered");
+                transitionCallState("answered", call);
+              }
+              break;
+
+            case "hangup":
+              console.log("📞 Call hangup detected via primary handler");
+              handleCallHangup(call, call.phoneNumber || config.phoneNumber);
+              break;
+
+            case "destroy":
+              console.log("📞 Call destroy detected via primary handler");
+              handleCallDestroy(call, call.phoneNumber || config.phoneNumber);
+              break;
+
+            case "failed":
+              console.log("📞 Call failed detected via primary handler");
+              handleCallFailed(call, call.phoneNumber || config.phoneNumber);
               break;
           }
         }
-      });
-
-      // Specific call event handlers
-      const callEventHandlers = {
-        "call.hangup": (call: any) => {
-          const duration = callStartTime
-            ? Math.floor((Date.now() - callStartTime) / 1000)
-            : undefined;
-          transitionCallState("ended", call);
-          trackCall(call, "completed", duration);
-          notifyCallStatus(
-            "completed",
-            call.phoneNumber || config.phoneNumber,
-            duration
-          );
-        },
-
-        "call.failed": (call: any) => {
-          transitionCallState("failed", call);
-          setError("Call failed - Invalid phone number or connection error");
-          trackCall(call, "failed");
-          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
-        },
-
-        "call.rejected": (call: any) => {
-          transitionCallState("failed", call);
-          setError("Call rejected");
-          trackCall(call, "failed");
-          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
-        },
-
-        "call.error": (call: any, error: any) => {
-          transitionCallState("error", call);
-          setError("Call failed");
-          trackCall(call, "failed");
-          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
-        },
-
-        "call.busy": (call: any) => {
-          transitionCallState("failed", call);
-          setError("Number is busy");
-          trackCall(call, "failed");
-          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
-        },
-
-        "call.no-answer": (call: any) => {
-          transitionCallState("failed", call);
-          setError("No answer - call timed out");
-          trackCall(call, "failed");
-          notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
-        },
-
-        "call.destroy": (call: any) => {
-          const duration = callStartTime
-            ? Math.floor((Date.now() - callStartTime) / 1000)
-            : undefined;
-
-          if (call.state === "hangup" && callState === "connecting") {
-            setError(
-              "Call failed - Phone number may be invalid or unavailable"
-            );
-            transitionCallState("failed", call);
-            trackCall(call, "failed");
-            notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
-          } else if (call.state === "destroy" && callState === "connecting") {
-            setError(
-              "Call connection failed - Please check your network connection"
-            );
-            transitionCallState("failed", call);
-            trackCall(call, "failed");
-            notifyCallStatus("failed", call.phoneNumber || config.phoneNumber);
-          } else {
-            transitionCallState("ended", call);
-            trackCall(call, "completed", duration);
-            notifyCallStatus(
-              "completed",
-              call.phoneNumber || config.phoneNumber,
-              duration
-            );
-          }
-        },
-
-        "call.ringing": (call: any) => {
-          transitionCallState("ringing", call);
-          setCurrentCall(call);
-        },
-
-        "call.answered": (call: any) => {
-          transitionCallState("answered", call);
-          setIsCallActive(true);
-          setIsConnecting(false);
-          setCallStartTime(Date.now());
-          trackCall(call, "completed");
-          notifyCallStatus("completed", call.phoneNumber || config.phoneNumber);
-        },
-
-        "call.progress": (call: any) => {
-          // Call progress event
-        },
-
-        "call.early": (call: any) => {
-          // Early media event
-        },
-      };
-
-      // Register all call event handlers
-      Object.entries(callEventHandlers).forEach(([event, handler]) => {
-        telnyxClient.on(event, handler);
       });
 
       // Network events
@@ -674,16 +696,324 @@ export const useTelnyxWebRTC = (
     },
     [
       config,
-      callStartTime,
-      callState,
       transitionCallState,
       trackCall,
       notifyCallStatus,
       attemptReconnection,
-      error,
-      isCallActive,
+      callStartTime,
+      callState,
       isConnecting,
     ]
+  );
+
+  // ============================================================================
+  // CALL HANDLING
+  // ============================================================================
+
+  // COMPLETELY REWRITTEN CALL HANDLING SYSTEM - NO MORE call.on() RELIANCE
+  const handleCallCreation = useCallback(
+    (call: any, phoneNumber: string) => {
+      console.log(
+        "🔄 HANDLE CALL CREATION - Starting new call handling system"
+      );
+
+      // Set initial call state
+      setCurrentCall(call);
+      setCallControlId(call.id);
+      setCallStartTime(Date.now());
+
+      // Store call start time locally to avoid state update delays
+      const localCallStartTime = Date.now();
+
+      // Transition to connecting state
+      transitionCallState("connecting", call);
+
+      // AGGRESSIVE CALL STATE MONITORING - Check every 100ms for immediate response
+      const callStateMonitor = setInterval(() => {
+        if (!call || !call.state) {
+          console.log("❌ Call or call.state is null, stopping monitor");
+          clearInterval(callStateMonitor);
+          return;
+        }
+
+        const currentTime = Date.now();
+        const callDuration = (currentTime - localCallStartTime) / 1000;
+
+        console.log(
+          `🔍 Call State Monitor: ${call.state} (${callDuration.toFixed(1)}s)`
+        );
+
+        // IMMEDIATE FAILURE DETECTION - If call fails within 2 seconds
+        if (
+          callDuration < 2 &&
+          (call.state === "hangup" || call.state === "destroy")
+        ) {
+          console.log(
+            "🚨 IMMEDIATE FAILURE DETECTED - Call failed in <2 seconds"
+          );
+
+          // Set error FIRST before any state changes
+          console.log("🚨 Setting error state for failed call");
+          const errorMessage =
+            "Call failed - Invalid phone number or number not reachable";
+          console.log("🚨 Error message:", errorMessage);
+          setError(errorMessage);
+
+          // Verify error was set
+          setTimeout(() => {
+            console.log("🔍 Error state verification - should be set now");
+          }, 50);
+
+          // Log call to Supabase BEFORE state transition
+          console.log("📊 Logging failed call to Supabase");
+          trackCall(call, "failed", Math.floor(callDuration), phoneNumber);
+
+          // Notify status
+          notifyCallStatus("failed", phoneNumber);
+
+          // DON'T transition to idle immediately for call failures
+          // Keep the call state as "failed" so the error popup can show
+          console.log(
+            "🚨 Keeping call state as failed for error popup display"
+          );
+          // transitionCallState("idle", call); // REMOVED - let error popup handle this
+
+          // Clean up call objects but keep state for UI
+          setCurrentCall(null);
+          setCallControlId(null);
+          setCallStartTime(null);
+
+          // Stop monitoring
+          clearInterval(callStateMonitor);
+
+          // Force error to persist for a moment
+          setTimeout(() => {
+            console.log("🔍 Error state should now be visible to user");
+          }, 100);
+
+          return;
+        }
+
+        // Handle state transitions
+        switch (call.state) {
+          case "requesting":
+            if (callState !== "connecting") {
+              console.log("📞 Call requesting -> connecting");
+              transitionCallState("connecting", call);
+            }
+            break;
+
+          case "trying":
+            if (callState !== "trying") {
+              console.log("📞 Call trying -> trying");
+              transitionCallState("trying", call);
+            }
+            break;
+
+          case "ringing":
+            if (callState !== "ringing") {
+              console.log("📞 Call ringing -> ringing");
+              transitionCallState("ringing", call);
+            }
+            break;
+
+          case "answered":
+            if (callState !== "answered") {
+              console.log("📞 Call answered -> answered");
+              transitionCallState("answered", call);
+            }
+            break;
+
+          case "hangup":
+            console.log("📞 Call hangup detected");
+            handleCallHangup(call, phoneNumber);
+            clearInterval(callStateMonitor);
+            break;
+
+          case "destroy":
+            console.log("📞 Call destroy detected");
+            handleCallDestroy(call, phoneNumber);
+            clearInterval(callStateMonitor);
+            break;
+
+          case "failed":
+            console.log("📞 Call failed detected");
+            handleCallFailed(call, phoneNumber);
+            clearInterval(callStateMonitor);
+            break;
+        }
+
+        // TIMEOUT HANDLING - If call is stuck in connecting/trying for too long
+        if (
+          (call.state === "connecting" || call.state === "trying") &&
+          callDuration > 8
+        ) {
+          console.log("⏰ Call timeout - transitioning to failed");
+          handleCallFailed(call, phoneNumber);
+          clearInterval(callStateMonitor);
+        }
+      }, 100); // Check every 100ms for immediate response
+
+      // Store the interval for cleanup
+      timeoutManager.current.addInterval(callStateMonitor);
+    },
+    [callState, callStartTime, transitionCallState, trackCall, notifyCallStatus]
+  );
+
+  // REWRITTEN CALL EVENT HANDLERS
+  const handleCallHangup = useCallback(
+    (call: any, phoneNumber: string) => {
+      console.log("📞 HANDLE CALL HANGUP - Processing call hangup");
+
+      const duration = callStartTime
+        ? Math.floor((Date.now() - callStartTime) / 1000)
+        : 0;
+      console.log(`📞 Call hangup - Duration: ${duration}s`);
+
+      // Determine call status based on duration
+      let callStatus: "completed" | "failed" = "completed";
+      let errorMessage = "";
+
+      if (duration < 2) {
+        // Very short call - likely invalid number
+        callStatus = "failed";
+        errorMessage =
+          "Call failed - Invalid phone number or number not reachable";
+        console.log("🚨 Quick failure detected in hangup handler");
+      } else if (duration < 5) {
+        // Short call - might be temporary unavailability
+        callStatus = "failed";
+        errorMessage = "Call failed - Number temporarily unavailable";
+        console.log("⚠️ Short call failure detected in hangup handler");
+      }
+
+      // Set error if call failed (but only if not already set)
+      if (callStatus === "failed") {
+        // Only set error if it's not already set to avoid duplicates
+        if (!error || !error.includes("failed")) {
+          setError(errorMessage);
+          console.log("🚨 Setting error in hangup handler:", errorMessage);
+        } else {
+          console.log(
+            "🚨 Error already set, skipping duplicate in hangup handler"
+          );
+        }
+        // Keep call state as failed for error popup
+        console.log("🚨 Keeping call state as failed in hangup handler");
+        // transitionCallState("idle", call); // REMOVED - let error popup handle this
+      } else {
+        transitionCallState("idle", call);
+      }
+
+      // Track call in Supabase
+      trackCall(call, callStatus, duration, phoneNumber);
+
+      // Notify status
+      notifyCallStatus(callStatus, phoneNumber);
+
+      // Clean up call state
+      setCurrentCall(null);
+      setCallControlId(null);
+      setCallStartTime(null);
+    },
+    [callStartTime, transitionCallState, trackCall, notifyCallStatus]
+  );
+
+  const handleCallDestroy = useCallback(
+    (call: any, phoneNumber: string) => {
+      console.log("📞 HANDLE CALL DESTROY - Processing call destroy");
+
+      const duration = callStartTime
+        ? Math.floor((Date.now() - callStartTime) / 1000)
+        : 0;
+      console.log(`📞 Call destroy - Duration: ${duration}s`);
+
+      // Determine call status based on duration
+      let callStatus: "completed" | "failed" = "completed";
+      let errorMessage = "";
+
+      if (duration < 2) {
+        // Very short call - likely invalid number
+        callStatus = "failed";
+        errorMessage =
+          "Call failed - Invalid phone number or number not reachable";
+        console.log("🚨 Quick failure detected in destroy handler");
+      } else if (duration < 5) {
+        // Short call - might be temporary unavailability
+        callStatus = "failed";
+        errorMessage = "Call failed - Number temporarily unavailable";
+        console.log("⚠️ Short call failure detected in destroy handler");
+      }
+
+      // Set error if call failed (but only if not already set)
+      if (callStatus === "failed") {
+        // Only set error if it's not already set to avoid duplicates
+        if (!error || !error.includes("failed")) {
+          setError(errorMessage);
+          console.log("🚨 Setting error in destroy handler:", errorMessage);
+        } else {
+          console.log(
+            "🚨 Error already set, skipping duplicate in destroy handler"
+          );
+        }
+        // Keep call state as failed for error popup
+        console.log("🚨 Keeping call state as failed in destroy handler");
+        // transitionCallState("idle", call); // REMOVED - let error popup handle this
+      } else {
+        transitionCallState("idle", call);
+      }
+
+      // Track call in Supabase
+      trackCall(call, callStatus, duration, phoneNumber);
+
+      // Notify status
+      notifyCallStatus(callStatus, phoneNumber);
+
+      // Clean up call state
+      setCurrentCall(null);
+      setCallControlId(null);
+      setCallStartTime(null);
+    },
+    [callStartTime, transitionCallState, trackCall, notifyCallStatus]
+  );
+
+  const handleCallFailed = useCallback(
+    (call: any, phoneNumber: string) => {
+      console.log("📞 HANDLE CALL FAILED - Processing call failure");
+
+      const duration = callStartTime
+        ? Math.floor((Date.now() - callStartTime) / 1000)
+        : 0;
+      console.log(`📞 Call failed - Duration: ${duration}s`);
+
+      // Set error message (but only if not already set)
+      if (!error || !error.includes("failed")) {
+        setError("Call failed - Unable to connect");
+        console.log(
+          "🚨 Setting error in failed handler: Call failed - Unable to connect"
+        );
+      } else {
+        console.log(
+          "🚨 Error already set, skipping duplicate in failed handler"
+        );
+      }
+
+      // Keep current state for error popup display
+      console.log("🚨 Keeping current call state for error popup display");
+      // transitionCallState("failed", call); // REMOVED - let error popup handle this
+
+      // Track call in Supabase
+      trackCall(call, "failed", duration, phoneNumber);
+
+      // Notify status
+      notifyCallStatus("failed", phoneNumber);
+
+      // Clean up call state
+      setCurrentCall(null);
+      setCallControlId(null);
+      setCallStartTime(null);
+    },
+    [callStartTime, transitionCallState, trackCall, notifyCallStatus]
   );
 
   // ============================================================================
@@ -905,29 +1235,6 @@ export const useTelnyxWebRTC = (
         setIsConnecting(true);
         setError(null);
 
-        const handleCallCreation = (call: any) => {
-          if (!call || typeof call !== "object") {
-            throw new Error("Failed to create call object");
-          }
-
-          setCurrentCall(call);
-          transitionCallState("connecting", call);
-
-          // Set timeout for call progression
-          const callProgressionTimeout = setTimeout(() => {
-            if (callState === "connecting" || callState === "trying") {
-              transitionCallState("failed", call);
-              setError(
-                "Call failed - please check the phone number and try again"
-              );
-              trackCall(call, "failed");
-              notifyCallStatus("failed", phoneNumber);
-            }
-          }, 15000);
-
-          timeoutManager.current.addTimeout(callProgressionTimeout);
-        };
-
         // Try different call creation methods
         let call: any;
         if (typeof client.newCall === "function") {
@@ -953,22 +1260,41 @@ export const useTelnyxWebRTC = (
 
         if (!call || typeof call !== "object") {
           transitionCallState("failed", call);
-          setError("Call failed");
+          // Only set error if not already set to avoid duplicates
+          if (!error || !error.includes("failed")) {
+            setError("Call failed");
+            console.log(
+              "🚨 Setting error in makeCall (no call object): Call failed"
+            );
+          }
           notifyCallStatus("failed", phoneNumber);
           return;
         }
 
         if (call.error || call.state === "failed" || call.state === "error") {
           transitionCallState("failed", call);
-          setError("Call failed");
+          // Only set error if not already set to avoid duplicates
+          if (!error || !error.includes("failed")) {
+            setError("Call failed");
+            console.log(
+              "🚨 Setting error in makeCall (call error state): Call failed"
+            );
+          }
           notifyCallStatus("failed", phoneNumber);
           return;
         }
 
-        return handleCallCreation(call);
+        handleCallCreation(call, phoneNumber);
       } catch (err: any) {
         console.error("Call creation failed:", err);
-        setError(`Call failed: ${err.message || "Unknown error"}`);
+        // Only set error if not already set to avoid duplicates
+        if (!error || !error.includes("failed")) {
+          setError(`Call failed: ${err.message || "Unknown error"}`);
+          console.log(
+            "🚨 Setting error in makeCall catch block:",
+            `Call failed: ${err.message || "Unknown error"}`
+          );
+        }
         setIsConnecting(false);
         notifyCallStatus("failed", phoneNumber);
       }
@@ -982,6 +1308,7 @@ export const useTelnyxWebRTC = (
       transitionCallState,
       trackCall,
       notifyCallStatus,
+      handleCallCreation,
     ]
   );
 
@@ -1045,6 +1372,15 @@ export const useTelnyxWebRTC = (
     transitionCallState("idle");
   }, [transitionCallState]);
 
+  // Function to properly handle call failure completion (called by error popup)
+  const completeCallFailure = useCallback(() => {
+    console.log("🚨 Completing call failure - transitioning to idle");
+    transitionCallState("idle");
+    setCurrentCall(null);
+    setCallControlId(null);
+    setCallStartTime(null);
+  }, [transitionCallState]);
+
   const debugAudioSetup = useCallback(() => {
     // Debug function - can be expanded as needed
   }, []);
@@ -1091,6 +1427,7 @@ export const useTelnyxWebRTC = (
     // Utility functions
     clearError,
     forceResetCallState,
+    completeCallFailure,
     debugAudioSetup,
     triggerReconnection,
     retryMicrophoneAccess,

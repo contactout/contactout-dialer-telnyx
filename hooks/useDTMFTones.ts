@@ -24,7 +24,6 @@ export const useDTMFTones = () => {
   const initializeAudioContext = useCallback(() => {
     try {
       if (!audioContextRef.current) {
-        console.log("Initializing AudioContext on user interaction");
         audioContextRef.current = new (window.AudioContext ||
           (window as any).webkitAudioContext)();
 
@@ -33,7 +32,7 @@ export const useDTMFTones = () => {
           audioContextRef.current
             .resume()
             .then(() => {
-              console.log("AudioContext initialized and resumed successfully");
+              // AudioContext initialized successfully
             })
             .catch((err) => {
               console.error(
@@ -56,29 +55,25 @@ export const useDTMFTones = () => {
       }
 
       if (isPlayingRef.current) {
-        console.log("DTMF tone already playing, skipping");
         return;
       }
 
       if (!enabled) {
-        console.log("DTMF tones disabled, skipping");
         return;
       }
 
       try {
         if (!audioContextRef.current) {
-          console.log("Creating new AudioContext");
           audioContextRef.current = new (window.AudioContext ||
             (window as any).webkitAudioContext)();
         }
 
         // Resume audio context if it's suspended (browser requirement)
         if (audioContextRef.current.state === "suspended") {
-          console.log("AudioContext suspended, attempting to resume");
           audioContextRef.current
             .resume()
             .then(() => {
-              console.log("AudioContext resumed successfully");
+              // AudioContext resumed successfully
             })
             .catch((err) => {
               console.error("Failed to resume AudioContext:", err);
@@ -86,7 +81,6 @@ export const useDTMFTones = () => {
         }
 
         const frequencies = DTMF_FREQUENCIES[digit];
-        console.log("Playing DTMF tone with frequencies:", frequencies);
 
         const duration = 0.1; // 100ms tone duration
         const now = audioContextRef.current.currentTime;
@@ -115,11 +109,9 @@ export const useDTMFTones = () => {
         oscillator2.stop(now + duration);
 
         isPlayingRef.current = true;
-        console.log("DTMF tone started");
 
         setTimeout(() => {
           isPlayingRef.current = false;
-          console.log("DTMF tone finished");
         }, duration * 1000);
       } catch (error) {
         console.error("Failed to play DTMF tone:", error);

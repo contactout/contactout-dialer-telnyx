@@ -8,6 +8,7 @@ import CallingScreen from "@/components/CallingScreen";
 import AudioTest from "@/components/AudioTest";
 import SettingsDropdown from "@/components/SettingsDropdown";
 import CallHistory from "@/components/CallHistory";
+import ErrorPopup from "@/components/ErrorPopup";
 import { useDeviceDetection } from "@/hooks/useDeviceDetection";
 import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { useCallHistory } from "@/hooks/useCallHistory";
@@ -28,6 +29,8 @@ export default function Home() {
   const [autoRedirectCountdown, setAutoRedirectCountdown] = useState<
     number | null
   >(null);
+  const [showErrorPopup, setShowErrorPopup] = useState(false);
+  const [errorMessage, setErrorMessage] = useState("");
   const { isMobile } = useDeviceDetection();
   const { user, loading, signOut, session } = useAuth();
 
@@ -89,6 +92,7 @@ export default function Home() {
     networkQuality,
     isReconnecting,
     forceResetCallState,
+    completeCallFailure,
     clearError,
     triggerReconnection,
     retryMicrophoneAccess,
@@ -106,7 +110,14 @@ export default function Home() {
   // Auto-reset call state when there are errors to prevent UI from getting stuck
   useEffect(() => {
     if (error && (isConnecting || isCallActive)) {
-      // Check if this is a call failure error that should auto-redirect
+      console.log("🚨 ERROR DETECTED in main page:", {
+        error,
+        isConnecting,
+        isCallActive,
+        callState,
+      });
+
+      // Check if this is a call failure error that should show popup
       const isCallFailure =
         error.includes("invalid") ||
         error.includes("failed") ||
@@ -115,33 +126,18 @@ export default function Home() {
         error.includes("no-answer") ||
         error.includes("timeout");
 
+      console.log("🚨 Error type check:", { isCallFailure, error });
+
       if (isCallFailure) {
-        // Show error for 3 seconds then auto-redirect to dial pad
-        setAutoRedirectCountdown(3);
-
-        const countdownInterval = setInterval(() => {
-          setAutoRedirectCountdown((prev) => {
-            if (prev && prev > 1) {
-              return prev - 1;
-            } else {
-              clearInterval(countdownInterval);
-              return null;
-            }
-          });
-        }, 1000);
-
-        const resetTimeout = setTimeout(() => {
-          forceResetCallState();
-          setPhoneNumber(""); // Clear the phone number
-          setAutoRedirectCountdown(null);
-        }, 3000);
-
-        return () => {
-          clearTimeout(resetTimeout);
-          clearInterval(countdownInterval);
-        };
+        // For call failures, show error popup instead of auto-redirecting
+        console.log("🚨 Setting error popup for call failure");
+        setErrorMessage(error);
+        setShowErrorPopup(true);
+        // Don't auto-redirect - let user control when to return to dialpad
+        setAutoRedirectCountdown(null);
       } else {
         // For other errors, just reset after 2 seconds
+        console.log("🚨 Non-call failure error, will auto-reset");
         const resetTimeout = setTimeout(() => {
           forceResetCallState();
         }, 2000);
@@ -149,7 +145,7 @@ export default function Home() {
         return () => clearTimeout(resetTimeout);
       }
     }
-  }, [error, isConnecting, isCallActive, forceResetCallState]);
+  }, [error, isConnecting, isCallActive, forceResetCallState, callState]);
 
   // Safety timeout to prevent calling screen from getting stuck indefinitely
   useEffect(() => {
@@ -257,18 +253,7 @@ export default function Home() {
     };
   }, [user?.id, adminStatusChecked]); // Include adminStatusChecked in dependencies
 
-  // Auto-return to dial pad when call errors occur
-  useEffect(() => {
-    if (error && (isConnecting || isCallActive)) {
-      // Wait a moment to show the error, then automatically return to dial pad
-      const timer = setTimeout(() => {
-        hangupCall();
-        setPhoneNumber("");
-      }, 3000); // Show error for 3 seconds before auto-return
-
-      return () => clearTimeout(timer);
-    }
-  }, [error, isConnecting, isCallActive, hangupCall]);
+  // Auto-return logic removed - now handled by error popup with user control
 
   // Update call duration when call is active
   useEffect(() => {
@@ -347,6 +332,17 @@ export default function Home() {
     }
   };
 
+  const handleBackspace = () => {
+    if (!isCallActive) {
+      // Remove the last digit from phone number
+      setPhoneNumber((prev) => prev.slice(0, -1));
+      // Clear any error messages when user starts editing
+      if (error) {
+        clearError();
+      }
+    }
+  };
+
   const handleCall = () => {
     if (phoneNumber) {
       makeCall(phoneNumber);
@@ -355,10 +351,13 @@ export default function Home() {
 
   const handleHangup = () => {
     hangupCall();
-    setPhoneNumber("");
-    setAutoRedirectCountdown(null);
-    // Explicitly clear error to ensure it's removed
-    clearError();
+    // Only clear phone number if there's no call failure error
+    if (!error || (!error.includes("failed") && !error.includes("invalid"))) {
+      setPhoneNumber("");
+      setAutoRedirectCountdown(null);
+    }
+    // Don't clear error immediately - let the user see what happened
+    // The error will be cleared by the error popup when user clicks OK
   };
 
   const handleClearNumber = () => {
@@ -389,6 +388,19 @@ export default function Home() {
     clearHistory();
     // Also clear any error messages when clearing history
     clearError();
+  };
+
+  // Handle error popup close
+  const handleErrorPopupClose = () => {
+    console.log("🚨 Error popup close handler called");
+    setShowErrorPopup(false);
+    setErrorMessage("");
+    clearError();
+    // Complete the call failure and return to dialpad
+    completeCallFailure();
+    setPhoneNumber("");
+    setAutoRedirectCountdown(null);
+    console.log("🚨 Error popup closed, returning to dialpad");
   };
 
   // Show calling screen when connecting OR when call is active
@@ -472,19 +484,23 @@ export default function Home() {
         </div>
 
         {/* Calling Screen */}
-        <div className="flex-1 flex flex-col">
+        <div className="flex-1 flex flex-col items-center justify-center">
           <CallingScreen
             phoneNumber={phoneNumber}
             onHangup={handleHangup}
             error={error}
             onReturnToDialPad={() => {
-              // Clear error and return to dial pad
-              forceResetCallState();
-
-              setPhoneNumber("");
-              setAutoRedirectCountdown(null);
-              // Explicitly clear error to ensure it's removed
-              clearError();
+              // Only return to dialpad if there's no call failure error
+              if (
+                !error ||
+                (!error.includes("failed") && !error.includes("invalid"))
+              ) {
+                forceResetCallState();
+                setPhoneNumber("");
+                setAutoRedirectCountdown(null);
+                clearError();
+              }
+              // If there's a call failure error, let the error popup handle the navigation
             }}
             onRetry={() => {
               // Retry the call with error recovery
@@ -593,8 +609,8 @@ export default function Home() {
         </div>
       </div>
 
-      {/* Error Display */}
-      {error && (
+      {/* Error Display - Only show non-call errors here */}
+      {error && !error.includes("failed") && !error.includes("invalid") && (
         <div className="mb-4 p-3 bg-red-100 border border-red-300 rounded-lg text-red-700 text-sm text-center">
           <div className="mb-2">{error}</div>
 
@@ -682,6 +698,7 @@ export default function Home() {
             <DialPad
               phoneNumber={phoneNumber}
               onDigitPress={handleDigitPress}
+              onBackspace={handleBackspace}
               onCall={handleCall}
               onHangup={handleHangup}
               onClear={handleClearNumber}
@@ -773,6 +790,13 @@ export default function Home() {
           onClose={() => setShowDTMFSettings(false)}
         />
       )}
+
+      {/* Error Popup Modal */}
+      <ErrorPopup
+        error={errorMessage}
+        isVisible={showErrorPopup}
+        onClose={handleErrorPopupClose}
+      />
     </main>
   );
 }

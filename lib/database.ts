@@ -43,7 +43,9 @@ export class DatabaseService {
       // First, check if user already exists and has a role set
       const { data: existingUser, error: fetchError } = await supabase
         .from("users")
-        .select("role, email, full_name")
+        .select(
+          "role, email, full_name, total_calls, successful_calls, failed_calls, created_at"
+        )
         .eq("id", userData.id)
         .single();
 
