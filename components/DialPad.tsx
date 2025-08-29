@@ -1,5 +1,12 @@
-import React, { useState } from "react";
+import React, { useState, useEffect } from "react";
 import { useDTMFTones } from "@/hooks/useDTMFTones";
+import {
+  validatePhoneNumberWithErrors,
+  toE164,
+  getCountryFlag,
+} from "@/lib/phoneNumberUtils";
+import { securityManager } from "@/lib/security";
+import { logError } from "@/lib/errorHandler";
 
 interface DialPadProps {
   phoneNumber: string;
@@ -29,6 +36,71 @@ const DialPad: React.FC<DialPadProps> = ({
   hasMicrophoneAccess = false,
 }) => {
   const { playTone, volume, enabled, initializeAudioContext } = useDTMFTones();
+  const [validationError, setValidationError] = useState<string>("");
+  const [isValidNumber, setIsValidNumber] = useState(false);
+  const [countryInfo, setCountryInfo] = useState<any>(null);
+  const [formattedNumber, setFormattedNumber] = useState("");
+
+  // Validate phone number when it changes
+  useEffect(() => {
+    if (phoneNumber) {
+      try {
+        // Security validation first
+        const securityValidation =
+          securityManager.validatePhoneNumber(phoneNumber);
+
+        if (securityValidation.riskLevel === "high") {
+          setValidationError("Invalid phone number format detected");
+          setIsValidNumber(false);
+          logError("High risk phone number input detected", {
+            level: "warning",
+            category: "security",
+            details: {
+              input: phoneNumber,
+              riskLevel: securityValidation.riskLevel,
+            },
+          });
+          return;
+        }
+
+        // Phone number format validation
+        const validation = validatePhoneNumberWithErrors(phoneNumber);
+        setIsValidNumber(validation.isValid);
+
+        if (validation.isValid) {
+          setValidationError("");
+          setFormattedNumber(validation.info.formattedNumber);
+          setCountryInfo(
+            validation.info.countryCode
+              ? {
+                  code: validation.info.countryCode,
+                  name: validation.info.countryName,
+                }
+              : null
+          );
+        } else {
+          setValidationError(
+            validation.errors[0] || "Invalid phone number format"
+          );
+          setFormattedNumber(phoneNumber);
+          setCountryInfo(null);
+        }
+      } catch (error) {
+        setValidationError("Error validating phone number");
+        setIsValidNumber(false);
+        logError("Phone number validation error", {
+          level: "error",
+          category: "validation",
+          details: { input: phoneNumber, error },
+        });
+      }
+    } else {
+      setValidationError("");
+      setIsValidNumber(false);
+      setFormattedNumber("");
+      setCountryInfo(null);
+    }
+  }, [phoneNumber]);
 
   const handleDigitClick = (digit: string) => {
     // Handle backspace specially
@@ -52,10 +124,12 @@ const DialPad: React.FC<DialPadProps> = ({
   // Check if call button should be disabled
   const isCallDisabled =
     !phoneNumber ||
+    !isValidNumber ||
     isConnecting ||
     isInitializing ||
     !isConnected ||
-    !hasMicrophoneAccess;
+    !hasMicrophoneAccess ||
+    !!validationError;
 
   // Get call button status text
   const getCallButtonText = () => {
@@ -63,6 +137,7 @@ const DialPad: React.FC<DialPadProps> = ({
     if (!isConnected) return "Not Connected";
     if (!hasMicrophoneAccess) return "No Microphone";
     if (!phoneNumber) return "Enter Number";
+    if (!isValidNumber) return "Invalid Number";
     if (isConnecting) return "Connecting...";
     return "Call";
   };
@@ -75,6 +150,7 @@ const DialPad: React.FC<DialPadProps> = ({
     if (!hasMicrophoneAccess)
       return "Microphone access is required. Please allow microphone permissions.";
     if (!phoneNumber) return "Please enter a phone number to call.";
+    if (!isValidNumber) return "Please enter a valid phone number.";
     if (isConnecting) return "Call is in progress...";
     return "Click to make a call";
   };
@@ -91,8 +167,30 @@ const DialPad: React.FC<DialPadProps> = ({
       {/* Phone Number Display */}
       <div className="mb-6 p-4 bg-gray-100 rounded-lg text-center">
         <div className="text-xl font-mono text-gray-800 min-h-[2rem]">
-          {phoneNumber || "Enter number"}
+          {formattedNumber || "Enter number"}
         </div>
+
+        {/* Country Flag and Info */}
+        {countryInfo && (
+          <div className="mt-2 flex items-center justify-center space-x-2 text-sm text-gray-600">
+            <span>{getCountryFlag(countryInfo.code)}</span>
+            <span>{countryInfo.name}</span>
+          </div>
+        )}
+
+        {/* Validation Error */}
+        {validationError && (
+          <div className="mt-2 text-sm text-red-600 font-medium">
+            {validationError}
+          </div>
+        )}
+
+        {/* E.164 Format Display */}
+        {isValidNumber && phoneNumber && (
+          <div className="mt-2 text-xs text-gray-500 font-mono">
+            E.164: {toE164(phoneNumber)}
+          </div>
+        )}
       </div>
 
       {/* Dial Pad Grid - Hidden when calling or call is active */}
@@ -154,6 +252,26 @@ const DialPad: React.FC<DialPadProps> = ({
           <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-green-100 text-green-800">
             <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
             Call Active
+          </div>
+        </div>
+      )}
+
+      {/* Validation Status */}
+      {phoneNumber && !isCallActive && (
+        <div className="mt-4 text-center">
+          <div
+            className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
+              isValidNumber
+                ? "bg-green-100 text-green-800"
+                : "bg-red-100 text-red-800"
+            }`}
+          >
+            <div
+              className={`w-2 h-2 rounded-full mr-2 ${
+                isValidNumber ? "bg-green-500" : "bg-red-500"
+              }`}
+            ></div>
+            {isValidNumber ? "Valid Number" : "Invalid Number"}
           </div>
         </div>
       )}
