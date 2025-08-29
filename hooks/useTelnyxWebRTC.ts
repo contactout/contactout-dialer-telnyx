@@ -6,16 +6,7 @@ import { DatabaseService } from "@/lib/database";
 // TYPES AND INTERFACES
 // ============================================================================
 
-type CallState =
-  | "idle"
-  | "connecting"
-  | "trying"
-  | "ringing"
-  | "answered"
-  | "active"
-  | "ended"
-  | "failed"
-  | "error";
+type CallState = "idle" | "dialing" | "ringing" | "connected" | "ended";
 
 type NetworkQuality = "excellent" | "good" | "fair" | "poor";
 
@@ -180,13 +171,10 @@ export const useTelnyxWebRTC = (
     timeoutManager.current.clearAll();
 
     if (localStreamRef.current) {
-      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current.getTracks().forEach((track) => {
+        track.stop();
+      });
       localStreamRef.current = null;
-    }
-
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
     }
 
     // Only reset initializing flag, not the initialized flag
@@ -209,15 +197,11 @@ export const useTelnyxWebRTC = (
 
         // Validate state transitions
         const validTransitions: Record<CallState, CallState[]> = {
-          idle: ["connecting", "trying"],
-          connecting: ["trying", "ringing", "failed", "error", "idle"],
-          trying: ["ringing", "answered", "failed", "error", "idle"],
-          ringing: ["answered", "failed", "error", "idle"],
-          answered: ["active", "ended", "failed", "error"],
-          active: ["ended", "failed", "error"],
+          idle: ["dialing"],
+          dialing: ["ringing", "ended"],
+          ringing: ["connected", "ended"],
+          connected: ["ended"],
           ended: ["idle"],
-          failed: ["idle"],
-          error: ["idle"],
         };
 
         if (!validTransitions[currentState].includes(newState)) {
@@ -238,8 +222,7 @@ export const useTelnyxWebRTC = (
           setError(null);
           cleanupAll();
           break;
-        case "connecting":
-        case "trying":
+        case "dialing":
           setIsConnecting(true);
           setIsCallActive(false);
           setCurrentCall(call);
@@ -251,8 +234,7 @@ export const useTelnyxWebRTC = (
           setCurrentCall(call);
           setError(null);
           break;
-        case "answered":
-        case "active":
+        case "connected":
           setIsConnecting(false);
           setIsCallActive(true);
           setCurrentCall(call);
@@ -262,8 +244,6 @@ export const useTelnyxWebRTC = (
           }
           break;
         case "ended":
-        case "failed":
-        case "error":
           setIsConnecting(false);
           setIsCallActive(false);
           setError(null);
@@ -583,7 +563,7 @@ export const useTelnyxWebRTC = (
           // IMMEDIATE FAILURE DETECTION - Handle quick failures first
           if (
             (call.state === "hangup" || call.state === "destroy") &&
-            (callState === "connecting" || callState === "trying")
+            callState === "dialing"
           ) {
             if (callDuration < 1.5) {
               console.log(
@@ -638,16 +618,16 @@ export const useTelnyxWebRTC = (
           // Handle all state transitions
           switch (call.state) {
             case "requesting":
-              if (callState !== "connecting") {
-                console.log("📞 Call requesting -> connecting");
-                transitionCallState("connecting", call);
+              if (callState !== "dialing") {
+                console.log("📞 Call requesting -> dialing");
+                transitionCallState("dialing", call);
               }
               break;
 
             case "trying":
-              if (callState !== "trying") {
-                console.log("📞 Call trying -> trying");
-                transitionCallState("trying", call);
+              if (callState !== "dialing") {
+                console.log("📞 Call trying -> dialing");
+                transitionCallState("dialing", call);
               }
               break;
 
@@ -659,9 +639,9 @@ export const useTelnyxWebRTC = (
               break;
 
             case "answered":
-              if (callState !== "answered") {
-                console.log("📞 Call answered -> answered");
-                transitionCallState("answered", call);
+              if (callState !== "connected") {
+                console.log("📞 Call answered -> connected");
+                transitionCallState("connected", call);
               }
               break;
 
@@ -771,8 +751,8 @@ export const useTelnyxWebRTC = (
       // Store call start time locally to avoid state update delays
       const localCallStartTime = Date.now();
 
-      // Transition to connecting state
-      transitionCallState("connecting", call);
+      // Transition to dialing state
+      transitionCallState("dialing", call);
 
       // AGGRESSIVE CALL STATE MONITORING - Check every 100ms for immediate response
       const callStateMonitor = setInterval(() => {
@@ -844,16 +824,16 @@ export const useTelnyxWebRTC = (
         // Handle state transitions
         switch (call.state) {
           case "requesting":
-            if (callState !== "connecting") {
-              console.log("📞 Call requesting -> connecting");
-              transitionCallState("connecting", call);
+            if (callState !== "dialing") {
+              console.log("📞 Call requesting -> dialing");
+              transitionCallState("dialing", call);
             }
             break;
 
           case "trying":
-            if (callState !== "trying") {
-              console.log("📞 Call trying -> trying");
-              transitionCallState("trying", call);
+            if (callState !== "dialing") {
+              console.log("📞 Call trying -> dialing");
+              transitionCallState("dialing", call);
             }
             break;
 
@@ -865,9 +845,9 @@ export const useTelnyxWebRTC = (
             break;
 
           case "answered":
-            if (callState !== "answered") {
-              console.log("📞 Call answered -> answered");
-              transitionCallState("answered", call);
+            if (callState !== "connected") {
+              console.log("📞 Call answered -> connected");
+              transitionCallState("connected", call);
             }
             break;
 
@@ -1028,42 +1008,60 @@ export const useTelnyxWebRTC = (
 
   const handleCallFailed = useCallback(
     (call: any, phoneNumber: string) => {
-      console.log("📞 HANDLE CALL FAILED - Processing call failure");
+      try {
+        console.log("📞 HANDLE CALL FAILED - Processing call failure");
 
-      const duration = callStartTime
-        ? Math.floor((Date.now() - callStartTime) / 1000)
-        : 0;
-      console.log(`📞 Call failed - Duration: ${duration}s`);
+        const duration = callStartTime
+          ? Math.floor((Date.now() - callStartTime) / 1000)
+          : 0;
+        console.log(`📞 Call failed - Duration: ${duration}s`);
 
-      // Set error message (but only if not already set)
-      if (!error || !error.includes("failed")) {
+        // Set error message (but only if not already set)
+        if (!error || !error.includes("failed")) {
+          setError("Call failed - Unable to connect");
+          console.log(
+            "🚨 Setting error in failed handler: Call failed - Unable to connect"
+          );
+        } else {
+          console.log(
+            "🚨 Error already set, skipping duplicate in failed handler"
+          );
+        }
+
+        // Keep current state for error popup display
+        console.log("🚨 Keeping current call state for error popup display");
+        // transitionCallState("failed", call); // REMOVED - let error popup handle this
+
+        // Track call in Supabase with error handling
+        try {
+          trackCall(call, "failed", duration, phoneNumber);
+        } catch (trackError) {
+          console.error("Error tracking failed call:", trackError);
+        }
+
+        // Notify status with error handling
+        try {
+          notifyCallStatus("failed", phoneNumber);
+        } catch (notifyError) {
+          console.error("Error notifying call status:", notifyError);
+        }
+
+        // Clean up call state
+        setCurrentCall(null);
+        setCallControlId(null);
+        setCallStartTime(null);
+        setCurrentDialedNumber(null);
+      } catch (error) {
+        console.error("🚨 Error in handleCallFailed:", error);
+        // Fallback cleanup
+        setCurrentCall(null);
+        setCallControlId(null);
+        setCallStartTime(null);
+        setCurrentDialedNumber(null);
         setError("Call failed - Unable to connect");
-        console.log(
-          "🚨 Setting error in failed handler: Call failed - Unable to connect"
-        );
-      } else {
-        console.log(
-          "🚨 Error already set, skipping duplicate in failed handler"
-        );
       }
-
-      // Keep current state for error popup display
-      console.log("🚨 Keeping current call state for error popup display");
-      // transitionCallState("failed", call); // REMOVED - let error popup handle this
-
-      // Track call in Supabase
-      trackCall(call, "failed", duration, phoneNumber);
-
-      // Notify status
-      notifyCallStatus("failed", phoneNumber);
-
-      // Clean up call state
-      setCurrentCall(null);
-      setCallControlId(null);
-      setCallStartTime(null);
-      setCurrentDialedNumber(null);
     },
-    [callStartTime, transitionCallState, trackCall, notifyCallStatus]
+    [callStartTime, transitionCallState, trackCall, notifyCallStatus, error]
   );
 
   // ============================================================================
@@ -1330,7 +1328,7 @@ export const useTelnyxWebRTC = (
         }
 
         if (!call || typeof call !== "object") {
-          transitionCallState("failed", call);
+          transitionCallState("ended", call);
           // Only set error if not already set to avoid duplicates
           if (!error || !error.includes("failed")) {
             setError("Call failed");
@@ -1343,7 +1341,7 @@ export const useTelnyxWebRTC = (
         }
 
         if (call.error || call.state === "failed" || call.state === "error") {
-          transitionCallState("failed", call);
+          transitionCallState("ended", call);
           // Only set error if not already set to avoid duplicates
           if (!error || !error.includes("failed")) {
             setError("Call failed");
@@ -1479,12 +1477,21 @@ export const useTelnyxWebRTC = (
 
   // Function to properly handle call failure completion (called by error popup)
   const completeCallFailure = useCallback(() => {
-    console.log("🚨 Completing call failure - transitioning to idle");
-    transitionCallState("idle");
-    setCurrentCall(null);
-    setCallControlId(null);
-    setCallStartTime(null);
-    setCurrentDialedNumber(null);
+    try {
+      console.log("🚨 Completing call failure - transitioning to idle");
+      transitionCallState("idle");
+      setCurrentCall(null);
+      setCallControlId(null);
+      setCallStartTime(null);
+      setCurrentDialedNumber(null);
+    } catch (error) {
+      console.error("🚨 Error in completeCallFailure:", error);
+      // Fallback cleanup
+      setCurrentCall(null);
+      setCallControlId(null);
+      setCallStartTime(null);
+      setCurrentDialedNumber(null);
+    }
   }, [transitionCallState]);
 
   const debugAudioSetup = useCallback(() => {

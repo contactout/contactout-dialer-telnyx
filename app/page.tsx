@@ -6,13 +6,7 @@ import { useDeviceDetection } from "@/hooks/useDeviceDetection";
 import { useCallHistory } from "@/hooks/useCallHistory";
 import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { Phone, History } from "lucide-react";
-import {
-  useDialerState,
-  DialerState,
-  DialerActions,
-} from "@/hooks/useDialerState";
-import { useDialerLogic, DialerLogic } from "@/hooks/useDialerLogic";
-import { useDialerEffects, DialerEffects } from "@/hooks/useDialerEffects";
+import { useDialer } from "@/hooks/useDialer";
 import { useDialerConfig, DialerConfig } from "@/hooks/useDialerConfig";
 
 // Components
@@ -24,6 +18,7 @@ import AudioTest from "@/components/AudioTest";
 import AudioSettings from "@/components/AudioSettings";
 import DTMFSettings from "@/components/DTMFSettings";
 import ErrorPopup from "@/components/ErrorPopup";
+import ErrorBoundary from "@/components/ErrorBoundary";
 import SettingsDropdown from "@/components/SettingsDropdown";
 import CallAnalyticsDashboard from "@/components/CallAnalyticsDashboard";
 import LoginScreen from "@/components/LoginScreen";
@@ -32,9 +27,6 @@ export default function Home() {
   // Core hooks
   const { user, loading, signOut, session, isAdmin } = useAuth();
   const { isMobile } = useDeviceDetection();
-
-  // State management
-  const [state, actions] = useDialerState();
 
   // Configuration
   const config = useDialerConfig();
@@ -63,11 +55,8 @@ export default function Home() {
     }
   );
 
-  // Business logic
-  const logic = useDialerLogic(state, actions, telnyxActions);
-
-  // Side effects
-  const effects = useDialerEffects(state, actions, telnyxActions);
+  // Consolidated dialer hook
+  const [state, actions, logic] = useDialer(telnyxActions);
 
   // Debug logging for admin status
   useEffect(() => {
@@ -450,51 +439,53 @@ export default function Home() {
   );
 
   return (
-    <main className="min-h-screen">
-      {isMobile ? (
-        <div className="p-6 flex flex-col justify-center min-h-screen bg-gray-50">
-          {dialPadComponent}
-        </div>
-      ) : (
-        <PhoneMockup>{dialPadComponent}</PhoneMockup>
-      )}
+    <ErrorBoundary>
+      <main className="min-h-screen">
+        {isMobile ? (
+          <div className="p-6 flex flex-col justify-center min-h-screen bg-gray-50">
+            {dialPadComponent}
+          </div>
+        ) : (
+          <PhoneMockup>{dialPadComponent}</PhoneMockup>
+        )}
 
-      {/* Modals */}
-      {state.showAudioTest && (
-        <AudioTest onClose={() => actions.setShowAudioTest(false)} />
-      )}
+        {/* Modals */}
+        {state.showAudioTest && (
+          <AudioTest onClose={() => actions.setShowAudioTest(false)} />
+        )}
 
-      {state.showAudioSettings && (
-        <AudioSettings
-          isVisible={state.showAudioSettings}
-          onClose={() => actions.setShowAudioSettings(false)}
+        {state.showAudioSettings && (
+          <AudioSettings
+            isVisible={state.showAudioSettings}
+            onClose={() => actions.setShowAudioSettings(false)}
+          />
+        )}
+
+        {state.showDTMFSettings && (
+          <DTMFSettings
+            volume={0.3}
+            onVolumeChange={(volume) => {}}
+            enabled={true}
+            onToggleEnabled={() => {}}
+            onClose={() => actions.setShowDTMFSettings(false)}
+          />
+        )}
+
+        {/* Error Popup Modal */}
+        <ErrorPopup
+          error={state.errorMessage}
+          isVisible={state.showErrorPopup}
+          onClose={logic.handleErrorPopupClose}
         />
-      )}
 
-      {state.showDTMFSettings && (
-        <DTMFSettings
-          volume={0.3}
-          onVolumeChange={(volume) => {}}
-          enabled={true}
-          onToggleEnabled={() => {}}
-          onClose={() => actions.setShowDTMFSettings(false)}
+        {/* Analytics Dashboard */}
+        <CallAnalyticsDashboard
+          callHistory={callHistory}
+          userId={user?.id}
+          isVisible={state.showAnalytics}
+          onClose={() => actions.setShowAnalytics(false)}
         />
-      )}
-
-      {/* Error Popup Modal */}
-      <ErrorPopup
-        error={state.errorMessage}
-        isVisible={state.showErrorPopup}
-        onClose={logic.handleErrorPopupClose}
-      />
-
-      {/* Analytics Dashboard */}
-      <CallAnalyticsDashboard
-        callHistory={callHistory}
-        userId={user?.id}
-        isVisible={state.showAnalytics}
-        onClose={() => actions.setShowAnalytics(false)}
-      />
-    </main>
+      </main>
+    </ErrorBoundary>
   );
 }

@@ -1,7 +1,5 @@
-import React, { useEffect, useCallback, useState } from "react";
+import React, { useEffect, useCallback } from "react";
 import { Phone } from "lucide-react";
-import { validatePhoneNumber, getCountryFlag } from "@/lib/phoneNumberUtils";
-import { logError } from "@/lib/errorHandler";
 import { useDTMFTones } from "@/hooks/useDTMFTones";
 
 interface DialPadProps {
@@ -29,48 +27,12 @@ const DialPad: React.FC<DialPadProps> = ({
   isConnected,
   hasMicrophoneAccess,
 }) => {
-  const [formattedNumber, setFormattedNumber] = React.useState("");
-  const [countryInfo, setCountryInfo] = React.useState<any>(null);
-  const [validationError, setValidationError] = React.useState("");
-  const [isValidNumber, setIsValidNumber] = React.useState(false);
+
 
   // Use the proper DTMF tones hook
   const { playTone, initializeAudioContext } = useDTMFTones();
 
-  // Validate and format phone number
-  useEffect(() => {
-    if (phoneNumber) {
-      try {
-        const validation = validatePhoneNumber(phoneNumber);
-        if (validation.isValid) {
-          setIsValidNumber(true);
-          setValidationError("");
-          setFormattedNumber(validation.formattedNumber);
-          setCountryInfo({
-            code: validation.countryCode,
-            name: validation.countryName,
-          });
-        } else {
-          setValidationError("Invalid phone number format");
-          setFormattedNumber(phoneNumber);
-          setCountryInfo(null);
-        }
-      } catch (error) {
-        setValidationError("Error validating phone number");
-        setIsValidNumber(false);
-        logError("Phone number validation error", {
-          level: "error",
-          category: "validation",
-          details: { input: phoneNumber, error },
-        });
-      }
-    } else {
-      setValidationError("");
-      setIsValidNumber(false);
-      setFormattedNumber("");
-      setCountryInfo(null);
-    }
-  }, [phoneNumber]);
+
 
   const handleDigitClick = useCallback(
     (digit: string) => {
@@ -93,33 +55,27 @@ const DialPad: React.FC<DialPadProps> = ({
   // Check if call button should be disabled
   const isCallDisabled =
     !phoneNumber ||
-    !isValidNumber ||
     isConnecting ||
     isInitializing ||
     !isConnected ||
-    !hasMicrophoneAccess ||
-    !!validationError;
+    !hasMicrophoneAccess;
 
   // Debug logging for call button state
   useEffect(() => {
     console.log("🔍 Call button state check:", {
       phoneNumber,
-      isValidNumber,
       isConnecting,
       isInitializing,
       isConnected,
       hasMicrophoneAccess,
-      validationError,
       isCallDisabled,
     });
   }, [
     phoneNumber,
-    isValidNumber,
     isConnecting,
     isInitializing,
     isConnected,
     hasMicrophoneAccess,
-    validationError,
     isCallDisabled,
   ]);
 
@@ -131,7 +87,6 @@ const DialPad: React.FC<DialPadProps> = ({
     if (!hasMicrophoneAccess)
       return "Microphone access is required. Please allow microphone permissions.";
     if (!phoneNumber) return "Please enter a phone number to call.";
-    if (!isValidNumber) return "Please enter a valid phone number.";
     if (isConnecting) return "Call is in progress...";
     return "Click to make a call";
   };
@@ -148,22 +103,10 @@ const DialPad: React.FC<DialPadProps> = ({
       {/* Phone Number Display */}
       <div className="mb-6 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl text-center border border-gray-200 shadow-sm">
         <div className="text-xl font-mono text-gray-800 min-h-[2rem] flex items-center justify-center">
-          {countryInfo && (
-            <span className="mr-2 text-2xl">
-              {getCountryFlag(countryInfo.code)}
-            </span>
-          )}
-          {formattedNumber || (
+          {phoneNumber || (
             <span className="text-gray-400 font-normal">Enter number</span>
           )}
         </div>
-
-        {/* Validation Error */}
-        {validationError && (
-          <div className="mt-2 text-sm text-red-600 font-medium bg-red-50 px-3 py-2 rounded-lg border border-red-200">
-            {validationError}
-          </div>
-        )}
       </div>
 
       {/* Dial Pad Grid - Hidden when calling or call is active */}
@@ -193,12 +136,10 @@ const DialPad: React.FC<DialPadProps> = ({
               console.log("📞 Call button clicked!");
               console.log("📊 Call button state:", {
                 phoneNumber,
-                isValidNumber,
                 isConnecting,
                 isInitializing,
                 isConnected,
                 hasMicrophoneAccess,
-                validationError,
               });
               onCall();
             }}

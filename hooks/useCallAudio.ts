@@ -1,4 +1,5 @@
 import { useCallback, useRef, useEffect } from "react";
+import { useSharedAudio } from "./useSharedAudio";
 
 // Audio feedback types for different call states
 export type CallAudioType =
@@ -27,7 +28,7 @@ export const useCallAudio = (
     ringtoneStyle: "modern",
   }
 ) => {
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const { getAudioContext, resumeAudioContext } = useSharedAudio();
   const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const busyToneIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const errorToneIntervalRef = useRef<NodeJS.Timeout | null>(null);
@@ -35,19 +36,14 @@ export const useCallAudio = (
   // Initialize audio context
   const initializeAudioContext = useCallback(() => {
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext ||
-          (window as any).webkitAudioContext)();
-
-        // Resume if suspended
-        if (audioContextRef.current.state === "suspended") {
-          audioContextRef.current.resume();
-        }
+      const context = getAudioContext();
+      if (context) {
+        resumeAudioContext();
       }
     } catch (error) {
       console.error("Failed to initialize audio context:", error);
     }
-  }, []);
+  }, [getAudioContext, resumeAudioContext]);
 
   // Cleanup all audio
   const cleanupAudio = useCallback(() => {
@@ -67,18 +63,19 @@ export const useCallAudio = (
 
   // Classic phone ringtone (2-tone alternating pattern)
   const playClassicRingtone = useCallback(() => {
-    if (!audioContextRef.current || !config.enabled) return;
+    const audioContext = getAudioContext();
+    if (!audioContext || !config.enabled) return;
 
-    const now = audioContextRef.current.currentTime;
+    const now = audioContext.currentTime;
 
     // Modern ringtone frequencies that sound more authentic
     const freq1 = 440; // A4 note (more pleasant)
     const freq2 = 554; // C#5 note (harmonious with A4)
 
     // Create oscillators for the two-tone ringtone
-    const osc1 = audioContextRef.current.createOscillator();
-    const osc2 = audioContextRef.current.createOscillator();
-    const gain = audioContextRef.current.createGain();
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    const gain = audioContext.createGain();
 
     // Set frequencies and waveform type
     osc1.frequency.setValueAtTime(freq1, now);
@@ -89,7 +86,7 @@ export const useCallAudio = (
     // Connect audio nodes
     osc1.connect(gain);
     osc2.connect(gain);
-    gain.connect(audioContextRef.current.destination);
+    gain.connect(audioContext.destination);
 
     // Authentic ringtone pattern: 2 seconds on, 4 seconds off
     // This matches traditional phone ringtone timing
@@ -114,18 +111,19 @@ export const useCallAudio = (
 
   // Alternative modern ringtone (more pleasant frequencies)
   const playModernRingtone = useCallback(() => {
-    if (!audioContextRef.current || !config.enabled) return;
+    const audioContext = getAudioContext();
+    if (!audioContext || !config.enabled) return;
 
-    const now = audioContextRef.current.currentTime;
+    const now = audioContext.currentTime;
 
     // Pleasant musical frequencies for modern ringtone
     const freq1 = 523; // C5 note
     const freq2 = 659; // E5 note (major third - harmonious)
 
     // Create oscillators for the two-tone ringtone
-    const osc1 = audioContextRef.current.createOscillator();
-    const osc2 = audioContextRef.current.createOscillator();
-    const gain = audioContextRef.current.createGain();
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    const gain = audioContext.createGain();
 
     // Set frequencies and waveform type
     osc1.frequency.setValueAtTime(freq1, now);
@@ -136,7 +134,7 @@ export const useCallAudio = (
     // Connect audio nodes
     osc1.connect(gain);
     osc2.connect(gain);
-    gain.connect(audioContextRef.current.destination);
+    gain.connect(audioContext.destination);
 
     // Modern ringtone pattern: 1.5 seconds on, 3 seconds off
     const ringDuration = 1.5; // 1.5 seconds of ringing
@@ -160,18 +158,19 @@ export const useCallAudio = (
 
   // Traditional North American ringtone (480Hz + 620Hz with proper timing)
   const playTraditionalRingtone = useCallback(() => {
-    if (!audioContextRef.current || !config.enabled) return;
+    const audioContext = getAudioContext();
+    if (!audioContext || !config.enabled) return;
 
-    const now = audioContextRef.current.currentTime;
+    const now = audioContext.currentTime;
 
     // Standard North American ringtone frequencies
     const freq1 = 480; // Lower frequency (Hz)
     const freq2 = 620; // Higher frequency (Hz)
 
     // Create oscillators for the two-tone ringtone
-    const osc1 = audioContextRef.current.createOscillator();
-    const osc2 = audioContextRef.current.createOscillator();
-    const gain = audioContextRef.current.createGain();
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    const gain = audioContext.createGain();
 
     // Set frequencies and waveform type
     osc1.frequency.setValueAtTime(freq1, now);
@@ -182,7 +181,7 @@ export const useCallAudio = (
     // Connect audio nodes
     osc1.connect(gain);
     osc2.connect(gain);
-    gain.connect(audioContextRef.current.destination);
+    gain.connect(audioContext.destination);
 
     // Traditional ringtone pattern: 2 seconds on, 4 seconds off
     const ringDuration = 2.0; // 2 seconds of ringing
@@ -206,17 +205,18 @@ export const useCallAudio = (
 
   // Busy tone (when call fails or number is busy)
   const playBusyTone = useCallback(() => {
-    if (!audioContextRef.current || !config.enabled) return;
+    const audioContext = getAudioContext();
+    if (!audioContext || !config.enabled) return;
 
-    const now = audioContextRef.current.currentTime;
+    const now = audioContext.currentTime;
 
     // Busy tone: 480Hz + 620Hz alternating every 0.5 seconds
     const freq1 = 480;
     const freq2 = 620;
 
-    const osc1 = audioContextRef.current.createOscillator();
-    const osc2 = audioContextRef.current.createOscillator();
-    const gain = audioContextRef.current.createGain();
+    const osc1 = audioContext.createOscillator();
+    const osc2 = audioContext.createOscillator();
+    const gain = audioContext.createGain();
 
     osc1.frequency.setValueAtTime(freq1, now);
     osc2.frequency.setValueAtTime(freq2, now);
@@ -225,7 +225,7 @@ export const useCallAudio = (
 
     osc1.connect(gain);
     osc2.connect(gain);
-    gain.connect(audioContextRef.current.destination);
+    gain.connect(audioContext.destination);
 
     // Busy tone pattern: 0.5s on, 0.5s off
     const toneDuration = 0.5;
@@ -247,9 +247,10 @@ export const useCallAudio = (
 
   // Error tone (for connection failures)
   const playErrorTone = useCallback(() => {
-    if (!audioContextRef.current || !config.enabled) return;
+    const audioContext = getAudioContext();
+    if (!audioContext || !config.enabled) return;
 
-    const now = audioContextRef.current.currentTime;
+    const now = audioContext.currentTime;
 
     // Error tone: three descending beeps
     const frequencies = [800, 600, 400];
@@ -259,14 +260,14 @@ export const useCallAudio = (
     frequencies.forEach((freq, index) => {
       const startTime = now + index * (beepDuration + silenceBetweenBeeps);
 
-      const osc = audioContextRef.current!.createOscillator();
-      const gain = audioContextRef.current!.createGain();
+      const osc = audioContext.createOscillator();
+      const gain = audioContext.createGain();
 
       osc.frequency.setValueAtTime(freq, startTime);
       osc.type = "sine";
 
       osc.connect(gain);
-      gain.connect(audioContextRef.current!.destination);
+      gain.connect(audioContext.destination);
 
       gain.gain.setValueAtTime(0, startTime);
       gain.gain.linearRampToValueAtTime(config.statusVolume, startTime + 0.01);
@@ -283,18 +284,19 @@ export const useCallAudio = (
 
   // Call connected sound (when call is answered)
   const playCallConnectedSound = useCallback(() => {
-    if (!audioContextRef.current || !config.enabled) return;
+    const audioContext = getAudioContext();
+    if (!audioContext || !config.enabled) return;
 
     try {
-      const now = audioContextRef.current.currentTime;
+      const now = audioContext.currentTime;
 
       // Two ascending tones to indicate success
       const freq1 = 800;
       const freq2 = 1000;
 
-      const osc1 = audioContextRef.current.createOscillator();
-      const osc2 = audioContextRef.current.createOscillator();
-      const gain = audioContextRef.current.createGain();
+      const osc1 = audioContext.createOscillator();
+      const osc2 = audioContext.createOscillator();
+      const gain = audioContext.createGain();
 
       osc1.frequency.setValueAtTime(freq1, now);
       osc2.frequency.setValueAtTime(freq2, now + 0.1);
@@ -303,7 +305,7 @@ export const useCallAudio = (
 
       osc1.connect(gain);
       osc2.connect(gain);
-      gain.connect(audioContextRef.current.destination);
+      gain.connect(audioContext.destination);
 
       // First tone
       gain.gain.setValueAtTime(0, now);
@@ -328,18 +330,19 @@ export const useCallAudio = (
 
   // Call ended sound
   const playCallEndedSound = useCallback(() => {
-    if (!audioContextRef.current || !config.enabled) return;
+    const audioContext = getAudioContext();
+    if (!audioContext || !config.enabled) return;
 
     try {
-      const now = audioContextRef.current.currentTime;
+      const now = audioContext.currentTime;
 
       // Two descending tones to indicate call end
       const freq1 = 1000;
       const freq2 = 600;
 
-      const osc1 = audioContextRef.current.createOscillator();
-      const osc2 = audioContextRef.current.createOscillator();
-      const gain = audioContextRef.current.createGain();
+      const osc1 = audioContext.createOscillator();
+      const osc2 = audioContext.createOscillator();
+      const gain = audioContext.createGain();
 
       osc1.frequency.setValueAtTime(freq1, now);
       osc2.frequency.setValueAtTime(freq2, now + 0.1);
@@ -348,7 +351,7 @@ export const useCallAudio = (
 
       osc1.connect(gain);
       osc2.connect(gain);
-      gain.connect(audioContextRef.current.destination);
+      gain.connect(audioContext.destination);
 
       // First tone
       gain.gain.setValueAtTime(0, now);
@@ -373,21 +376,22 @@ export const useCallAudio = (
 
   // Connecting sound (softer than ringtone)
   const playConnectingSound = useCallback(() => {
-    if (!audioContextRef.current || !config.enabled) return;
+    const audioContext = getAudioContext();
+    if (!audioContext || !config.enabled) return;
 
-    const now = audioContextRef.current.currentTime;
+    const now = audioContext.currentTime;
 
     // Single soft tone to indicate connecting
     const freq = 600;
 
-    const osc = audioContextRef.current.createOscillator();
-    const gain = audioContextRef.current.createGain();
+    const osc = audioContext.createOscillator();
+    const gain = audioContext.createGain();
 
     osc.frequency.setValueAtTime(freq, now);
     osc.type = "sine";
 
     osc.connect(gain);
-    gain.connect(audioContextRef.current.destination);
+    gain.connect(audioContext.destination);
 
     // Soft connecting sound
     gain.gain.setValueAtTime(0, now);
@@ -494,10 +498,6 @@ export const useCallAudio = (
   useEffect(() => {
     return () => {
       cleanupAudio();
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
     };
   }, [cleanupAudio]);
 

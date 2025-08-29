@@ -1,4 +1,5 @@
 import { useCallback, useRef, useState } from "react";
+import { useSharedAudio } from "./useSharedAudio";
 
 const DTMF_FREQUENCIES: { [key: string]: [number, number] } = {
   "1": [697, 1209],
@@ -16,39 +17,24 @@ const DTMF_FREQUENCIES: { [key: string]: [number, number] } = {
 };
 
 export const useDTMFTones = () => {
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const { getAudioContext, resumeAudioContext } = useSharedAudio();
   const isPlayingRef = useRef(false);
   const [volume, setVolume] = useState(0.4); // Default volume at 40% for better audibility
   const [enabled, setEnabled] = useState(true); // Default enabled
 
   const initializeAudioContext = useCallback(() => {
     try {
-      if (!audioContextRef.current) {
-        audioContextRef.current = new (window.AudioContext ||
-          (window as any).webkitAudioContext)();
-
-        // Resume the context
-        if (audioContextRef.current.state === "suspended") {
-          audioContextRef.current
-            .resume()
-            .then(() => {
-              // AudioContext initialized successfully
-            })
-            .catch((err) => {
-              console.error(
-                "Failed to resume AudioContext during initialization:",
-                err
-              );
-            });
-        }
+      const context = getAudioContext();
+      if (context) {
+        resumeAudioContext();
       }
     } catch (error) {
       console.error("Failed to initialize AudioContext:", error);
     }
-  }, []);
+  }, [getAudioContext, resumeAudioContext]);
 
   const playTone = useCallback(
-    (digit: string) => {
+    async (digit: string) => {
       if (!DTMF_FREQUENCIES[digit]) {
         console.warn("Invalid digit for DTMF tone:", digit);
         return;
@@ -63,33 +49,22 @@ export const useDTMFTones = () => {
       }
 
       try {
-        if (!audioContextRef.current) {
-          audioContextRef.current = new (window.AudioContext ||
-            (window as any).webkitAudioContext)();
-        }
+        const audioContext = getAudioContext();
+        if (!audioContext) return;
 
         // Resume audio context if it's suspended (browser requirement)
-        if (audioContextRef.current.state === "suspended") {
-          audioContextRef.current
-            .resume()
-            .then(() => {
-              // AudioContext resumed successfully
-            })
-            .catch((err) => {
-              console.error("Failed to resume AudioContext:", err);
-            });
-        }
+        await resumeAudioContext();
 
         const frequencies = DTMF_FREQUENCIES[digit];
 
         // Enhanced DTMF tone with better timing and envelope
         const duration = 0.12; // 120ms tone duration (standard DTMF duration)
-        const now = audioContextRef.current.currentTime;
+        const now = audioContext.currentTime;
 
         // Create two oscillators for the dual-tone DTMF
-        const oscillator1 = audioContextRef.current.createOscillator();
-        const oscillator2 = audioContextRef.current.createOscillator();
-        const gainNode = audioContextRef.current.createGain();
+        const oscillator1 = audioContext.createOscillator();
+        const oscillator2 = audioContext.createOscillator();
+        const gainNode = audioContext.createGain();
 
         // Set frequencies for the two tones
         oscillator1.frequency.setValueAtTime(frequencies[0], now);
@@ -109,7 +84,7 @@ export const useDTMFTones = () => {
         // Connect oscillators to gain node, then to destination
         oscillator1.connect(gainNode);
         oscillator2.connect(gainNode);
-        gainNode.connect(audioContextRef.current.destination);
+        gainNode.connect(audioContext.destination);
 
         // Start and stop oscillators
         oscillator1.start(now);
@@ -145,10 +120,7 @@ export const useDTMFTones = () => {
 
   // Cleanup function to properly dispose of audio context
   const cleanup = useCallback(() => {
-    if (audioContextRef.current) {
-      audioContextRef.current.close();
-      audioContextRef.current = null;
-    }
+    // Cleanup is handled by the shared audio context
   }, []);
 
   // Test function to verify DTMF tones are working
