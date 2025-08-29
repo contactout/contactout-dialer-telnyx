@@ -132,15 +132,6 @@ export const useDialer = (telnyxActions: {
   }).current;
 
   // Track user changes for debugging
-  useEffect(() => {
-    if (previousUserIdRef.current !== userId) {
-      console.log("User ID changed:", {
-        from: previousUserIdRef.current,
-        to: userId,
-      });
-      previousUserIdRef.current = userId;
-    }
-  }, [userId]);
 
   // Validate phone number when it changes
   useEffect(() => {
@@ -374,7 +365,6 @@ export const useDialer = (telnyxActions: {
   );
 
   const handleErrorPopupClose = useCallback(() => {
-    console.log("🚨 Error popup close handler called");
     setShowErrorPopup(false);
     setErrorMessageAction("");
     telnyxActions.clearError();
@@ -382,7 +372,6 @@ export const useDialer = (telnyxActions: {
     telnyxActions.completeCallFailure();
     setPhoneNumber("");
     setAutoRedirectCountdownAction(null);
-    console.log("🚨 Error popup closed, returning to dialpad");
   }, [
     telnyxActions,
     setShowErrorPopup,
@@ -452,7 +441,10 @@ export const useDialer = (telnyxActions: {
         telnyxActions.error.includes("rejected") ||
         telnyxActions.error.includes("busy") ||
         telnyxActions.error.includes("no-answer") ||
-        telnyxActions.error.includes("timeout");
+        telnyxActions.error.includes("timeout") ||
+        telnyxActions.error.includes("voice mail") ||
+        telnyxActions.error.includes("User hung up") ||
+        telnyxActions.error.includes("Message left");
 
       if (isCallFailure) {
         // For call failures, immediately redirect to dialpad and show error popup
@@ -512,6 +504,25 @@ export const useDialer = (telnyxActions: {
     setErrorMessageAction,
     setShowErrorPopup,
   ]);
+
+  // Voice mail detection and handling
+  useEffect(() => {
+    if (telnyxActions.callState === "voicemail") {
+      // Show voice mail notification
+      setErrorMessageAction(
+        "Call forwarded to voice mail - You can leave a message"
+      );
+      setShowErrorPopup(true);
+
+      // Auto-hide after 5 seconds for voice mail
+      const voiceMailTimeout = setTimeout(() => {
+        setShowErrorPopup(false);
+        setErrorMessageAction("");
+      }, 5000);
+
+      return () => clearTimeout(voiceMailTimeout);
+    }
+  }, [telnyxActions.callState, setErrorMessageAction, setShowErrorPopup]);
 
   // Clear countdown when call state changes to idle
   useEffect(() => {

@@ -6,6 +6,7 @@ export type CallAudioType =
   | "ringing"
   | "connecting"
   | "connected"
+  | "voicemail"
   | "ended"
   | "failed"
   | "busy"
@@ -451,6 +452,11 @@ export const useCallAudio = (
 
         case "connected":
           playCallConnectedSound();
+          break;
+
+        case "voicemail":
+          // Play a distinctive sound for voice mail
+          playCallConnectedSound(); // Use connected sound for now, could be customized
           break;
 
         case "ended":

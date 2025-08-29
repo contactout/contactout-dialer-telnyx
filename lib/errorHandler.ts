@@ -265,6 +265,24 @@ export class ErrorHandler {
         suggestion: "Try calling again or leave a message if available.",
         retry: true,
       },
+      "Call forwarded to voice mail": {
+        title: "Voice Mail",
+        message: "The call was forwarded to voice mail.",
+        suggestion: "You can leave a message or try calling again later.",
+        retry: true,
+      },
+      "Call forwarded to voice mail - User hung up": {
+        title: "Voice Mail Detected",
+        message: "You reached voice mail and chose to hang up.",
+        suggestion: "You can call back later or try a different time.",
+        retry: true,
+      },
+      "Call forwarded to voice mail - Message left": {
+        title: "Voice Mail Completed",
+        message: "You successfully left a message on voice mail.",
+        suggestion: "The recipient will get your message when they check.",
+        retry: false,
+      },
       "Busy signal": {
         title: "Line Busy",
         message: "The number is currently busy.",

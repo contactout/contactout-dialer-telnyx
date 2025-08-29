@@ -7,7 +7,7 @@ import { useCallHistory } from "@/hooks/useCallHistory";
 import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
 import { Phone, History } from "lucide-react";
 import { useDialer } from "@/hooks/useDialer";
-import { useDialerConfig, DialerConfig } from "@/hooks/useDialerConfig";
+import { useDialerConfig } from "@/hooks/useDialerConfig";
 
 // Components
 import PhoneMockup from "@/components/PhoneMockup";
@@ -46,8 +46,6 @@ export default function Home() {
     user?.id,
     (status, phoneNumber, duration) => {
       // Call history is now automatically tracked in the database
-      // Refresh the call history to show the new call
-      console.log("Call completed:", { status, phoneNumber, duration });
       // Refresh call history after a short delay to ensure database update
       setTimeout(() => {
         refreshHistory();
@@ -57,15 +55,6 @@ export default function Home() {
 
   // Consolidated dialer hook
   const [state, actions, logic] = useDialer(telnyxActions);
-
-  // Debug logging for admin status
-  useEffect(() => {
-    console.log("Main page - Admin status changed:", {
-      isAdmin,
-      userEmail: user?.email,
-      userId: user?.id,
-    });
-  }, [isAdmin, user]);
 
   // Show loading spinner while checking auth
   if (loading) {

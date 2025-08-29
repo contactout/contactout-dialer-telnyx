@@ -90,6 +90,17 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
     }
   }, [isCallActive, callState, playCallAudio]);
 
+  // Play voice mail sound when call goes to voice mail
+  useEffect(() => {
+    if (isCallActive && callState === "voicemail") {
+      // Small delay to ensure smooth transition
+      const timer = setTimeout(() => {
+        playCallAudio("voicemail");
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isCallActive, callState, playCallAudio]);
+
   // Play call ended sound when call ends
   useEffect(() => {
     if (!isCallActive && !isConnecting && callState !== "idle") {
@@ -104,7 +115,10 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   // Get simplified status text
   const getStatusText = () => {
     if (error) return error;
-    if (isCallActive) return "Call in progress";
+    if (isCallActive) {
+      if (callState === "voicemail") return "Voice Mail - Leave a message";
+      return "Call in progress";
+    }
     if (isConnecting) {
       if (callState === "trying") return "Connecting...";
       if (callState === "ringing") return "Ringing...";

@@ -27,23 +27,15 @@ const DialPad: React.FC<DialPadProps> = ({
   isConnected,
   hasMicrophoneAccess,
 }) => {
-
-
   // Use the proper DTMF tones hook
   const { playTone, initializeAudioContext } = useDTMFTones();
 
-
-
   const handleDigitClick = useCallback(
     (digit: string) => {
-      console.log("🔢 Digit clicked:", digit);
-
       // Initialize audio context on first user interaction
-      console.log("🎵 Initializing audio context...");
       initializeAudioContext();
 
       // Play DTMF tone
-      console.log("🔊 Playing DTMF tone for digit:", digit);
       playTone(digit);
 
       // Handle digit press
@@ -59,25 +51,6 @@ const DialPad: React.FC<DialPadProps> = ({
     isInitializing ||
     !isConnected ||
     !hasMicrophoneAccess;
-
-  // Debug logging for call button state
-  useEffect(() => {
-    console.log("🔍 Call button state check:", {
-      phoneNumber,
-      isConnecting,
-      isInitializing,
-      isConnected,
-      hasMicrophoneAccess,
-      isCallDisabled,
-    });
-  }, [
-    phoneNumber,
-    isConnecting,
-    isInitializing,
-    isConnected,
-    hasMicrophoneAccess,
-    isCallDisabled,
-  ]);
 
   // Get call button tooltip
   const getCallButtonTooltip = () => {
@@ -133,14 +106,6 @@ const DialPad: React.FC<DialPadProps> = ({
           {/* Call Button - Always perfectly centered */}
           <button
             onClick={() => {
-              console.log("📞 Call button clicked!");
-              console.log("📊 Call button state:", {
-                phoneNumber,
-                isConnecting,
-                isInitializing,
-                isConnected,
-                hasMicrophoneAccess,
-              });
               onCall();
             }}
             disabled={isCallDisabled}

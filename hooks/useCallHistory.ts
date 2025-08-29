@@ -6,7 +6,7 @@ export interface CallRecord {
   id: string;
   phone_number: string;
   timestamp: string;
-  status: "completed" | "failed" | "missed" | "incoming";
+  status: "completed" | "failed" | "missed" | "incoming" | "voicemail";
   duration?: number;
   voice_cost?: number;
   sip_trunking_cost?: number;

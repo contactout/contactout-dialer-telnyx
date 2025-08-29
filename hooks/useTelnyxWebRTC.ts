@@ -6,7 +6,13 @@ import { DatabaseService } from "@/lib/database";
 // TYPES AND INTERFACES
 // ============================================================================
 
-type CallState = "idle" | "dialing" | "ringing" | "connected" | "ended";
+type CallState =
+  | "idle"
+  | "dialing"
+  | "ringing"
+  | "connected"
+  | "voicemail"
+  | "ended";
 
 type NetworkQuality = "excellent" | "good" | "fair" | "poor";
 
@@ -20,7 +26,7 @@ interface TelnyxConfig {
 interface CallRecord {
   user_id: string;
   phone_number: string;
-  status: "completed" | "failed" | "missed" | "incoming";
+  status: "completed" | "failed" | "missed" | "incoming" | "voicemail";
   call_control_id?: string;
   duration?: number;
 }
@@ -107,7 +113,7 @@ export const useTelnyxWebRTC = (
   config: TelnyxConfig,
   userId?: string,
   onCallStatusChange?: (
-    status: "completed" | "failed" | "missed" | "incoming",
+    status: "completed" | "failed" | "missed" | "incoming" | "voicemail",
     phoneNumber?: string,
     duration?: number
   ) => void
@@ -199,8 +205,9 @@ export const useTelnyxWebRTC = (
         const validTransitions: Record<CallState, CallState[]> = {
           idle: ["dialing"],
           dialing: ["ringing", "ended"],
-          ringing: ["connected", "ended"],
+          ringing: ["connected", "voicemail", "ended"],
           connected: ["ended"],
+          voicemail: ["ended"],
           ended: ["idle"],
         };
 
@@ -243,6 +250,15 @@ export const useTelnyxWebRTC = (
             setCallStartTime(Date.now());
           }
           break;
+        case "voicemail":
+          setIsConnecting(false);
+          setIsCallActive(true); // Treat voicemail as active call for DTMF support
+          setCurrentCall(call);
+          setError(null);
+          if (!callStartTime) {
+            setCallStartTime(Date.now());
+          }
+          break;
         case "ended":
           setIsConnecting(false);
           setIsCallActive(false);
@@ -251,6 +267,70 @@ export const useTelnyxWebRTC = (
       }
     },
     [cleanupAll]
+  );
+
+  // ============================================================================
+  // VOICE MAIL DETECTION LOGIC
+  // ============================================================================
+
+  /**
+   * Detect if a call has been forwarded to voice mail
+   * Based on Telnyx call patterns and duration analysis
+   */
+  const detectVoiceMail = useCallback(
+    (call: any, callDuration: number): boolean => {
+      try {
+        // Voice mail detection heuristics with confidence scoring
+        let confidence = 0;
+        const patterns = [];
+
+        // Pattern 1: Call answered but very short (typical voice mail greeting)
+        if (call.state === "answered" && callDuration < 3) {
+          confidence += 3;
+          patterns.push("Quick answer (< 3s)");
+        }
+
+        // Pattern 2: Call answered but short duration (voice mail pattern)
+        if (call.state === "answered" && callDuration < 5) {
+          confidence += 2;
+          patterns.push("Short duration (< 5s)");
+        }
+
+        // Pattern 3: Call answered after long ring (typical voice mail behavior)
+        if (call.state === "answered" && callDuration < 8) {
+          confidence += 1;
+          patterns.push("Long ring to answer (< 8s)");
+        }
+
+        // Pattern 4: Check if call has specific voice mail indicators
+        if (call.state === "answered" && call.legs && call.legs.length > 0) {
+          confidence += 2;
+          patterns.push("Multiple call legs");
+        }
+
+        // Pattern 5: Check for specific Telnyx voice mail indicators
+        if (call.state === "answered" && call.voice_mail_detected) {
+          confidence += 5;
+          patterns.push("Telnyx voice mail flag");
+        }
+
+        // Pattern 6: Check for machine answer patterns
+        if (call.state === "answered" && call.machine_answer) {
+          confidence += 4;
+          patterns.push("Machine answer detected");
+        }
+
+        const isVoiceMail = confidence >= 3; // Require at least 3 confidence points
+
+        // Voice mail detection logging removed for production
+
+        return isVoiceMail;
+      } catch (error) {
+        console.error("Error detecting voice mail:", error);
+        return false;
+      }
+    },
+    []
   );
 
   // ============================================================================
@@ -380,7 +460,7 @@ export const useTelnyxWebRTC = (
   const trackCall = useCallback(
     (
       call: any,
-      status: "completed" | "failed",
+      status: "completed" | "failed" | "voicemail",
       duration?: number,
       phoneNumberOverride?: string
     ) => {
@@ -394,34 +474,7 @@ export const useTelnyxWebRTC = (
         call.phoneNumber ||
         currentCall?.phoneNumber;
 
-      // Debug: Log the call object and tracking data
-      console.log("Tracking call to database:", {
-        call,
-        status,
-        duration,
-        userId,
-        phoneNumber,
-        callControlId: call.call_control_id,
-        callId: call.id,
-        currentCall: currentCall,
-        callProperties: {
-          hasPhoneNumber: !!call.phoneNumber,
-          hasCallControlId: !!call.call_control_id,
-          hasCallId: !!call.id,
-          callState: call.state,
-          callKeys: Object.keys(call || {}),
-        },
-      });
-
-      console.log("Calling DatabaseService.trackCall with:", {
-        user_id: userId,
-        phone_number: phoneNumber,
-        status,
-        call_control_id: call.id || call.call_control_id,
-        duration,
-        callId: call.id,
-        callState: call.state,
-      });
+      // Call tracking to database
 
       DatabaseService.trackCall({
         user_id: userId,
@@ -429,20 +482,16 @@ export const useTelnyxWebRTC = (
         status,
         call_control_id: call.id || call.call_control_id, // Use call.id as fallback
         duration,
-      })
-        .then(() => {
-          console.log("DatabaseService.trackCall completed successfully");
-        })
-        .catch((error) => {
-          console.error("DatabaseService.trackCall failed:", error);
-        });
+      }).catch((error) => {
+        console.error("DatabaseService.trackCall failed:", error);
+      });
     },
     [userId, config.phoneNumber, currentCall]
   );
 
   const notifyCallStatus = useCallback(
     (
-      status: "completed" | "failed" | "missed" | "incoming",
+      status: "completed" | "failed" | "missed" | "incoming" | "voicemail",
       phoneNumber?: string,
       duration?: number
     ) => {
@@ -461,7 +510,6 @@ export const useTelnyxWebRTC = (
     (telnyxClient: any) => {
       // Connection events
       telnyxClient.on("telnyx.ready", () => {
-        console.log("✅ Telnyx client ready - connection established");
         setIsConnected(true);
         setError(null);
         setIsInitializing(false);
@@ -541,7 +589,7 @@ export const useTelnyxWebRTC = (
 
       // Call events - PRIMARY CALL HANDLER (replaces call.on() events)
       telnyxClient.on("call", (call: any) => {
-        console.log("📞 Telnyx client call event received:", call.state);
+        // Telnyx client call event received
 
         // PRIMARY CALL HANDLER - This is now our main way to handle calls
         if (call && call.state) {
@@ -552,13 +600,7 @@ export const useTelnyxWebRTC = (
               ? (currentTime - callStartTime) / 1000
               : 0;
 
-          console.log("📞 Primary call handler:", {
-            callId: call.id,
-            state: call.state,
-            callDuration: callDuration.toFixed(1) + "s",
-            callState,
-            isConnecting,
-          });
+          // Primary call handler
 
           // IMMEDIATE FAILURE DETECTION - Handle quick failures first
           if (
@@ -566,9 +608,7 @@ export const useTelnyxWebRTC = (
             callState === "dialing"
           ) {
             if (callDuration < 1.5) {
-              console.log(
-                "🚨 IMMEDIATE FAILURE DETECTED - Invalid/unreachable number"
-              );
+              // Immediate failure detected
               // Set error and immediately transition to idle
               setError((prevError) => {
                 const failureMessage =
@@ -619,44 +659,46 @@ export const useTelnyxWebRTC = (
           switch (call.state) {
             case "requesting":
               if (callState !== "dialing") {
-                console.log("📞 Call requesting -> dialing");
                 transitionCallState("dialing", call);
               }
               break;
 
             case "trying":
               if (callState !== "dialing") {
-                console.log("📞 Call trying -> dialing");
                 transitionCallState("dialing", call);
               }
               break;
 
             case "ringing":
               if (callState !== "ringing") {
-                console.log("📞 Call ringing -> ringing");
                 transitionCallState("ringing", call);
               }
               break;
 
             case "answered":
-              if (callState !== "connected") {
-                console.log("📞 Call answered -> connected");
-                transitionCallState("connected", call);
+              if (callState !== "connected" && callState !== "voicemail") {
+                // Check if this is likely voice mail
+                const callDuration = callStartTime
+                  ? Math.floor((Date.now() - callStartTime) / 1000)
+                  : 0;
+
+                if (detectVoiceMail(call, callDuration)) {
+                  transitionCallState("voicemail", call);
+                } else {
+                  transitionCallState("connected", call);
+                }
               }
               break;
 
             case "hangup":
-              console.log("📞 Call hangup detected via primary handler");
               handleCallHangup(call, currentDialedNumber || "");
               break;
 
             case "destroy":
-              console.log("📞 Call destroy detected via primary handler");
               handleCallDestroy(call, currentDialedNumber || "");
               break;
 
             case "failed":
-              console.log("📞 Call failed detected via primary handler");
               handleCallFailed(call, currentDialedNumber || "");
               break;
           }
@@ -728,6 +770,7 @@ export const useTelnyxWebRTC = (
       callStartTime,
       callState,
       isConnecting,
+      detectVoiceMail,
     ]
   );
 
@@ -821,61 +864,14 @@ export const useTelnyxWebRTC = (
           return;
         }
 
-        // Handle state transitions
-        switch (call.state) {
-          case "requesting":
-            if (callState !== "dialing") {
-              console.log("📞 Call requesting -> dialing");
-              transitionCallState("dialing", call);
-            }
-            break;
-
-          case "trying":
-            if (callState !== "dialing") {
-              console.log("📞 Call trying -> dialing");
-              transitionCallState("dialing", call);
-            }
-            break;
-
-          case "ringing":
-            if (callState !== "ringing") {
-              console.log("📞 Call ringing -> ringing");
-              transitionCallState("ringing", call);
-            }
-            break;
-
-          case "answered":
-            if (callState !== "connected") {
-              console.log("📞 Call answered -> connected");
-              transitionCallState("connected", call);
-            }
-            break;
-
-          case "hangup":
-            console.log("📞 Call hangup detected");
-            handleCallHangup(call, phoneNumber);
-            clearInterval(callStateMonitor);
-            break;
-
-          case "destroy":
-            console.log("📞 Call destroy detected");
-            handleCallDestroy(call, phoneNumber);
-            clearInterval(callStateMonitor);
-            break;
-
-          case "failed":
-            console.log("📞 Call failed detected");
-            handleCallFailed(call, phoneNumber);
-            clearInterval(callStateMonitor);
-            break;
-        }
+        // Handle state transitions (duplicate removed)
+        // State transitions are handled in the primary call handler above
 
         // TIMEOUT HANDLING - If call is stuck in connecting/trying for too long
         if (
           (call.state === "connecting" || call.state === "trying") &&
           callDuration > 8
         ) {
-          console.log("⏰ Call timeout - transitioning to failed");
           handleCallFailed(call, phoneNumber);
           clearInterval(callStateMonitor);
         }
@@ -884,50 +880,72 @@ export const useTelnyxWebRTC = (
       // Store the interval for cleanup
       timeoutManager.current.addInterval(callStateMonitor);
     },
-    [callState, callStartTime, transitionCallState, trackCall, notifyCallStatus]
+    [
+      callState,
+      callStartTime,
+      transitionCallState,
+      trackCall,
+      notifyCallStatus,
+      detectVoiceMail,
+    ]
   );
 
   // REWRITTEN CALL EVENT HANDLERS
   const handleCallHangup = useCallback(
     (call: any, phoneNumber: string) => {
-      console.log("📞 HANDLE CALL HANGUP - Processing call hangup");
-
       const duration = callStartTime
         ? Math.floor((Date.now() - callStartTime) / 1000)
         : 0;
-      console.log(`📞 Call hangup - Duration: ${duration}s`);
 
-      // Determine call status based on duration
-      let callStatus: "completed" | "failed" = "completed";
+      // Determine call status based on duration and call state
+      let callStatus: "completed" | "failed" | "voicemail" = "completed";
       let errorMessage = "";
+      let isUserHangup = false;
 
-      if (duration < 2) {
+      // Check if this was a voice mail call
+      if (callState === "voicemail") {
+        callStatus = "voicemail";
+
+        // Determine if user hung up or system ended the call
+        if (duration < 15) {
+          // Short voice mail call - likely user hung up
+          errorMessage = "Call forwarded to voice mail - User hung up";
+          isUserHangup = true;
+        } else {
+          // Longer voice mail call - likely completed message
+          errorMessage = "Call forwarded to voice mail - Message left";
+        }
+      } else if (duration < 2) {
         // Very short call - likely invalid number
         callStatus = "failed";
         errorMessage =
           "Call failed - Invalid phone number or number not reachable";
-        console.log("🚨 Quick failure detected in hangup handler");
       } else if (duration < 5) {
         // Short call - might be temporary unavailability
         callStatus = "failed";
         errorMessage = "Call failed - Number temporarily unavailable";
-        console.log("⚠️ Short call failure detected in hangup handler");
       }
 
-      // Set error if call failed (but only if not already set)
-      if (callStatus === "failed") {
+      // Set error if call failed or voice mail (but only if not already set)
+      if (callStatus === "failed" || callStatus === "voicemail") {
         // Only set error if it's not already set to avoid duplicates
-        if (!error || !error.includes("failed")) {
+        if (
+          !error ||
+          !error.includes("failed") ||
+          !error.includes("voice mail")
+        ) {
           setError(errorMessage);
-          console.log("🚨 Setting error in hangup handler:", errorMessage);
-        } else {
-          console.log(
-            "🚨 Error already set, skipping duplicate in hangup handler"
-          );
         }
-        // Keep call state as failed for error popup
-        console.log("🚨 Keeping call state as failed in hangup handler");
-        // transitionCallState("idle", call); // REMOVED - let error popup handle this
+
+        if (callStatus === "voicemail") {
+          // For voice mail, show notification briefly then transition to idle
+          setTimeout(() => {
+            transitionCallState("idle", call);
+          }, 3000); // Show notification for 3 seconds
+        } else {
+          // Keep call state as failed for error popup
+          // transitionCallState("idle", call); // REMOVED - let error popup handle this
+        }
       } else {
         transitionCallState("idle", call);
       }
@@ -949,12 +967,9 @@ export const useTelnyxWebRTC = (
 
   const handleCallDestroy = useCallback(
     (call: any, phoneNumber: string) => {
-      console.log("📞 HANDLE CALL DESTROY - Processing call destroy");
-
       const duration = callStartTime
         ? Math.floor((Date.now() - callStartTime) / 1000)
         : 0;
-      console.log(`📞 Call destroy - Duration: ${duration}s`);
 
       // Determine call status based on duration
       let callStatus: "completed" | "failed" = "completed";
@@ -965,12 +980,10 @@ export const useTelnyxWebRTC = (
         callStatus = "failed";
         errorMessage =
           "Call failed - Invalid phone number or number not reachable";
-        console.log("🚨 Quick failure detected in destroy handler");
       } else if (duration < 5) {
         // Short call - might be temporary unavailability
         callStatus = "failed";
         errorMessage = "Call failed - Number temporarily unavailable";
-        console.log("⚠️ Short call failure detected in destroy handler");
       }
 
       // Set error if call failed (but only if not already set)
@@ -978,14 +991,8 @@ export const useTelnyxWebRTC = (
         // Only set error if it's not already set to avoid duplicates
         if (!error || !error.includes("failed")) {
           setError(errorMessage);
-          console.log("🚨 Setting error in destroy handler:", errorMessage);
-        } else {
-          console.log(
-            "🚨 Error already set, skipping duplicate in destroy handler"
-          );
         }
         // Keep call state as failed for error popup
-        console.log("🚨 Keeping call state as failed in destroy handler");
         // transitionCallState("idle", call); // REMOVED - let error popup handle this
       } else {
         transitionCallState("idle", call);
@@ -1009,27 +1016,16 @@ export const useTelnyxWebRTC = (
   const handleCallFailed = useCallback(
     (call: any, phoneNumber: string) => {
       try {
-        console.log("📞 HANDLE CALL FAILED - Processing call failure");
-
         const duration = callStartTime
           ? Math.floor((Date.now() - callStartTime) / 1000)
           : 0;
-        console.log(`📞 Call failed - Duration: ${duration}s`);
 
         // Set error message (but only if not already set)
         if (!error || !error.includes("failed")) {
           setError("Call failed - Unable to connect");
-          console.log(
-            "🚨 Setting error in failed handler: Call failed - Unable to connect"
-          );
-        } else {
-          console.log(
-            "🚨 Error already set, skipping duplicate in failed handler"
-          );
         }
 
         // Keep current state for error popup display
-        console.log("🚨 Keeping current call state for error popup display");
         // transitionCallState("failed", call); // REMOVED - let error popup handle this
 
         // Track call in Supabase with error handling
@@ -1135,7 +1131,6 @@ export const useTelnyxWebRTC = (
     setIsInitializing(true);
 
     const initializeClient = async () => {
-      console.log("🚀 Starting Telnyx WebRTC client initialization...");
       try {
         if (typeof TelnyxRTC === "undefined") {
           console.error("❌ Telnyx WebRTC SDK not loaded");
@@ -1197,11 +1192,7 @@ export const useTelnyxWebRTC = (
         setClient(telnyxClient);
 
         // Connect to Telnyx
-        console.log("🔌 Attempting to connect to Telnyx...");
         await telnyxClient.connect();
-        console.log(
-          "🔌 Telnyx connect() completed, waiting for ready event..."
-        );
         setIsInitializing(false);
         initializingRef.current = false;
         // Don't set initializedRef here - let the telnyx.ready event handle it
@@ -1390,7 +1381,6 @@ export const useTelnyxWebRTC = (
         currentCall.state === "destroy" ||
         currentCall.state === "idle")
     ) {
-      console.log("Call already in terminal state - proceeding with cleanup");
       transitionCallState("idle");
       return;
     }
@@ -1405,7 +1395,6 @@ export const useTelnyxWebRTC = (
           error?.message === "CALL DOES NOT EXIST"
         ) {
           // This is expected when the call has already ended
-          console.log("Call already ended - proceeding with cleanup");
         } else {
           console.error("Error hanging up call:", error);
         }
@@ -1446,7 +1435,7 @@ export const useTelnyxWebRTC = (
             error?.code === -32002 &&
             error?.message === "CALL DOES NOT EXIST"
           ) {
-            console.log("Call already ended during retry - proceeding");
+            // Call already ended during retry - proceeding
           } else {
             console.error("Error hanging up call during retry:", error);
           }
@@ -1478,7 +1467,6 @@ export const useTelnyxWebRTC = (
   // Function to properly handle call failure completion (called by error popup)
   const completeCallFailure = useCallback(() => {
     try {
-      console.log("🚨 Completing call failure - transitioning to idle");
       transitionCallState("idle");
       setCurrentCall(null);
       setCallControlId(null);

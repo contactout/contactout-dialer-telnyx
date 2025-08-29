@@ -5,7 +5,7 @@ export interface CallRecord {
   id?: string;
   user_id: string;
   phone_number: string;
-  status: "completed" | "failed" | "missed" | "incoming";
+  status: "completed" | "failed" | "missed" | "incoming" | "voicemail";
   timestamp: Date;
   duration?: number;
   call_control_id?: string;
@@ -122,7 +122,7 @@ export class DatabaseService {
       const cacheKey = `admin_check_${userId}`;
       this.adminCheckCache.delete(cacheKey);
 
-      console.log(`User ${userId} has been set as admin`);
+      // User has been set as admin
     } catch (error) {
       console.error("Error setting user as admin:", error);
       throw error;
@@ -168,7 +168,7 @@ export class DatabaseService {
 
   // Check if user is admin
   static async isUserAdmin(userId: string): Promise<boolean> {
-    console.log(`DatabaseService.isUserAdmin called for userId: ${userId}`);
+    // DatabaseService.isUserAdmin called
 
     // Clean up old cache entries periodically
     this.cleanupCache();
@@ -197,10 +197,7 @@ export class DatabaseService {
         .eq("id", userId)
         .single();
 
-      console.log(`Database query result for userId ${userId}:`, {
-        userData,
-        userError,
-      });
+      // Database query result processed
 
       if (userError) {
         console.warn(
@@ -218,7 +215,7 @@ export class DatabaseService {
 
       // Check if user has admin role
       if (userData?.role === "admin") {
-        console.log(`User ${userId} has admin role: true`);
+        // User has admin role
         this.adminCheckCache.set(cacheKey, {
           result: true,
           timestamp: now,
@@ -229,9 +226,7 @@ export class DatabaseService {
 
       // Fallback: check if email contains 'admin' (for backward compatibility)
       const result = userData?.email?.includes("admin") || false;
-      console.log(
-        `User ${userId} admin check result (email fallback): ${result}`
-      );
+      // Admin check result processed
 
       // Cache successful result
       this.adminCheckCache.set(cacheKey, {
@@ -322,12 +317,7 @@ export class DatabaseService {
         // Note: User statistics are now calculated directly from calls table
         // No need to manually update user stats
 
-        console.log("Call tracked successfully:", {
-          user_id: callData.user_id,
-          phone_number: callData.phone_number,
-          status: callData.status,
-          duration: callData.duration,
-        });
+        // Call tracked successfully
 
         return; // Success, exit retry loop
       } catch (error) {
@@ -629,8 +619,8 @@ export class DatabaseService {
     try {
       // Note: In a real application, you would use Supabase migrations
       // This is a simplified approach for demonstration
-      console.log("Database tables should be created via Supabase migrations");
-      console.log("Required tables: users, calls");
+      // Database tables should be created via Supabase migrations
+      // Required tables: users, calls
     } catch (error) {
       console.error("Error initializing tables:", error);
     }
@@ -738,7 +728,7 @@ export class DatabaseService {
 
     // If cache is still too large, clear it completely
     if (this.adminCheckCache.size > 100) {
-      console.log("Admin check cache too large, clearing completely");
+      // Admin check cache too large, clearing completely
       this.adminCheckCache.clear();
     }
   }
