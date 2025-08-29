@@ -46,10 +46,6 @@ export default function Home() {
   // Call history hook
   const {
     callHistory,
-    addCall,
-    getLastDialed,
-    clearHistory,
-    removeCall,
     formatTimestamp,
     loading: callHistoryLoading,
     error: callHistoryError,
@@ -287,20 +283,6 @@ export default function Home() {
   const handleRedial = (phoneNumber: string) => {
     setPhoneNumber(phoneNumber);
     setShowCallHistory(false);
-  };
-
-  const handleRemoveCall = async (callId: string) => {
-    await removeCall(callId);
-    // Clear error if this was the last call in history
-    if (callHistory.length <= 1) {
-      clearError();
-    }
-  };
-
-  const handleClearHistory = async () => {
-    await clearHistory();
-    // Also clear any error messages when clearing history
-    clearError();
   };
 
   // Handle error popup close
@@ -600,8 +582,6 @@ export default function Home() {
         <CallHistory
           callHistory={callHistory}
           onRedial={handleRedial}
-          onRemoveCall={handleRemoveCall}
-          onClearHistory={handleClearHistory}
           formatTimestamp={formatTimestamp}
           loading={callHistoryLoading}
           error={callHistoryError}

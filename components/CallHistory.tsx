@@ -4,8 +4,6 @@ import { CallRecord } from "@/hooks/useCallHistory";
 interface CallHistoryProps {
   callHistory: CallRecord[];
   onRedial: (phoneNumber: string) => void;
-  onRemoveCall: (callId: string) => void;
-  onClearHistory: () => void;
   formatTimestamp: (timestamp: string) => string;
   loading?: boolean;
   error?: string | null;
@@ -14,8 +12,6 @@ interface CallHistoryProps {
 const CallHistory: React.FC<CallHistoryProps> = ({
   callHistory,
   onRedial,
-  onRemoveCall,
-  onClearHistory,
   formatTimestamp,
   loading = false,
   error = null,
@@ -103,12 +99,6 @@ const CallHistory: React.FC<CallHistoryProps> = ({
       {/* Header */}
       <div className="flex items-center justify-between">
         <h3 className="text-lg font-semibold text-gray-900">Call History</h3>
-        <button
-          onClick={onClearHistory}
-          className="text-sm text-red-600 hover:text-red-800 transition-colors"
-        >
-          Clear All
-        </button>
       </div>
 
       {/* Call List */}
@@ -148,16 +138,10 @@ const CallHistory: React.FC<CallHistoryProps> = ({
                     Duration: {Math.round((call.duration / 60) * 100) / 100} min
                   </div>
                 )}
-                {/* Cost Information */}
-                {call.total_cost && call.total_cost > 0 && (
-                  <div className="text-xs text-green-600 mt-1">
-                    Cost: ${call.total_cost.toFixed(4)}
-                  </div>
-                )}
               </div>
 
-              {/* Actions */}
-              <div className="flex items-center space-x-2 ml-4">
+              {/* Actions - Only Redial */}
+              <div className="flex items-center ml-4">
                 <button
                   onClick={() => onRedial(call.phone_number)}
                   className="p-2 text-blue-600 hover:text-blue-800 hover:bg-blue-50 rounded-full transition-colors"
@@ -169,23 +153,6 @@ const CallHistory: React.FC<CallHistoryProps> = ({
                     viewBox="0 0 20 20"
                   >
                     <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-                  </svg>
-                </button>
-                <button
-                  onClick={() => onRemoveCall(call.id)}
-                  className="p-2 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded-full transition-colors"
-                  title="Remove from history"
-                >
-                  <svg
-                    className="w-4 h-4"
-                    fill="currentColor"
-                    viewBox="0 0 20 20"
-                  >
-                    <path
-                      fillRule="evenodd"
-                      d="M9 2a1 1 0 00-.894.553L7.382 4H4a1 1 0 000 2v10a2 2 0 002 2h8a2 2 0 002-2V6a1 1 0 100-2h-3.382l-.724-1.447A1 1 0 0011 2H9zM7 8a1 1 0 012 0v6a1 1 0 11-2 0V8zm5-1a1 1 0 00-1 1v6a1 1 0 11-2 0V8a1 1 0 00-1-1z"
-                      clipRule="evenodd"
-                    />
                   </svg>
                 </button>
               </div>
