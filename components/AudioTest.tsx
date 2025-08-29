@@ -1,5 +1,12 @@
 import React, { useState, useRef } from "react";
 
+// TypeScript declarations for Web Audio API
+declare global {
+  interface Window {
+    webkitAudioContext: typeof AudioContext;
+  }
+}
+
 interface AudioTestProps {
   onClose: () => void;
 }
