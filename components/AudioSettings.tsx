@@ -14,6 +14,9 @@ const AudioSettings: React.FC<AudioSettingsProps> = ({
   const [ringtoneVolume, setRingtoneVolume] = useState(0.3);
   const [statusVolume, setStatusVolume] = useState(0.25);
   const [enabled, setEnabled] = useState(true);
+  const [ringtoneStyle, setRingtoneStyle] = useState<
+    "classic" | "modern" | "traditional"
+  >("modern");
 
   // Create audio hook instance for testing
   const {
@@ -21,6 +24,8 @@ const AudioSettings: React.FC<AudioSettingsProps> = ({
     stopAllAudio,
     initializeAudioContext,
     playClassicRingtone,
+    playModernRingtone,
+    playTraditionalRingtone,
     playBusyTone,
     playErrorTone,
     playCallConnectedSound,
@@ -31,6 +36,7 @@ const AudioSettings: React.FC<AudioSettingsProps> = ({
     enabled,
     ringtoneVolume,
     statusVolume,
+    ringtoneStyle,
   });
 
   // Initialize audio context when component mounts
@@ -158,6 +164,33 @@ const AudioSettings: React.FC<AudioSettingsProps> = ({
             </p>
           </div>
 
+          {/* Ringtone Style */}
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <label className="text-sm font-medium text-gray-700">
+                Ringtone Style
+              </label>
+            </div>
+            <select
+              value={ringtoneStyle}
+              onChange={(e) =>
+                setRingtoneStyle(
+                  e.target.value as "classic" | "modern" | "traditional"
+                )
+              }
+              className="w-full px-3 py-2 border border-gray-300 rounded-md text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 focus:border-transparent"
+            >
+              <option value="modern">Modern (Pleasant musical tones)</option>
+              <option value="classic">Classic (Harmonious A4 + C#5)</option>
+              <option value="traditional">
+                Traditional (North American 480Hz + 620Hz)
+              </option>
+            </select>
+            <p className="text-xs text-gray-500 mt-1">
+              Choose your preferred ringtone sound
+            </p>
+          </div>
+
           {/* Status Sounds Volume */}
           <div>
             <div className="flex items-center justify-between mb-2">
@@ -211,14 +244,47 @@ const AudioSettings: React.FC<AudioSettingsProps> = ({
             <h4 className="text-sm font-medium text-gray-700 mb-3">
               Test Audio
             </h4>
-            <div className="grid grid-cols-2 gap-2">
+            <div className="grid grid-cols-2 gap-2 mb-3">
               <button
                 onClick={() => testAudio("ringtone")}
                 disabled={!enabled}
                 className="px-3 py-2 text-xs bg-blue-100 text-blue-700 rounded-md hover:bg-blue-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
               >
-                Test Ringtone
+                Test Current Ringtone
               </button>
+              <button
+                onClick={() => {
+                  stopAllAudio();
+                  playClassicRingtone();
+                }}
+                disabled={!enabled}
+                className="px-3 py-2 text-xs bg-green-100 text-green-700 rounded-md hover:bg-green-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Test Classic
+              </button>
+              <button
+                onClick={() => {
+                  stopAllAudio();
+                  playModernRingtone();
+                }}
+                disabled={!enabled}
+                className="px-3 py-2 text-xs bg-purple-100 text-purple-700 rounded-md hover:bg-purple-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Test Modern
+              </button>
+              <button
+                onClick={() => {
+                  stopAllAudio();
+                  playTraditionalRingtone();
+                }}
+                disabled={!enabled}
+                className="px-3 py-2 text-xs bg-orange-100 text-orange-700 rounded-md hover:bg-orange-200 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
+              >
+                Test Traditional
+              </button>
+            </div>
+
+            <div className="grid grid-cols-2 gap-2">
               <button
                 onClick={() => testAudio("connecting")}
                 disabled={!enabled}

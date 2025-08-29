@@ -493,10 +493,14 @@ export const useTelnyxWebRTC = (
       telnyxClient.on("telnyx.error", (error: any) => {
         console.error("Telnyx client error:", error);
 
+        // Enhanced error handling with Telnyx best practices
         const errorMessages: Record<string, string> = {
           AUTH_FAILED: "Authentication failed - please check credentials",
           NETWORK_ERROR: "Network error - please check connection",
           INVALID_CONFIG: "Invalid configuration - please check settings",
+          ICE_FAILED: "Connection failed - please check network",
+          MEDIA_ERROR: "Audio setup failed - please check microphone",
+          TIMEOUT: "Connection timeout - please try again",
         };
 
         const errorMessage =
@@ -511,12 +515,25 @@ export const useTelnyxWebRTC = (
           return prevError;
         });
 
-        setIsConnected(false);
-        setIsInitializing(false);
-        initializingRef.current = false;
-
+        // Handle different error types appropriately
         if (error.code === "AUTH_FAILED" || error.code === "INVALID_CONFIG") {
+          setIsConnected(false);
+          setIsInitializing(false);
+          initializingRef.current = false;
           transitionCallState("idle");
+        } else if (
+          error.code === "ICE_FAILED" ||
+          error.code === "NETWORK_ERROR"
+        ) {
+          // Network errors should trigger reconnection
+          setIsConnected(false);
+          if (!isReconnecting) {
+            setIsReconnecting(true);
+            attemptReconnection();
+          }
+        } else if (error.code === "MEDIA_ERROR") {
+          // Media errors should prompt user to check microphone
+          setHasMicrophoneAccess(false);
         }
       });
 
@@ -579,6 +596,23 @@ export const useTelnyxWebRTC = (
                   ? failureMessage
                   : prevError;
               });
+
+              // Log call to database with failure status
+              trackCall(
+                call,
+                "failed",
+                Math.floor(callDuration),
+                currentDialedNumber || undefined
+              );
+
+              // Notify status
+              notifyCallStatus("failed", currentDialedNumber || undefined);
+
+              // Clean up call state immediately
+              setCurrentCall(null);
+              setCallControlId(null);
+              setCallStartTime(null);
+
               transitionCallState("idle", call);
 
               // Log call to Supabase
@@ -1149,6 +1183,7 @@ export const useTelnyxWebRTC = (
           // Don't return here - continue with Telnyx initialization
         }
 
+        // Create Telnyx client with best practices configuration
         const telnyxClient = new TelnyxRTC({
           login_token: config.apiKey,
           login: config.sipUsername,
@@ -1250,22 +1285,36 @@ export const useTelnyxWebRTC = (
         setIsConnecting(true);
         setError(null);
 
-        // Try different call creation methods
+        // Create call using Telnyx best practices
         let call: any;
+
+        // Use the standard newCall method with proper parameters
         if (typeof client.newCall === "function") {
           call = client.newCall({
             destinationNumber: phoneNumber,
             callerNumber: config.phoneNumber,
+            // Add call options for better quality
+            audio: true,
+            video: false,
+            // Set proper headers for better routing
+            headers: {
+              "X-Call-Type": "outbound",
+              "X-User-Agent": "ContactOut-Dialer/1.0",
+            },
           });
         } else if (typeof (client as any).call === "function") {
           call = (client as any).call({
             destinationNumber: phoneNumber,
             callerNumber: config.phoneNumber,
+            audio: true,
+            video: false,
           });
         } else if (typeof (client as any).createCall === "function") {
           call = (client as any).createCall({
             destinationNumber: phoneNumber,
             callerNumber: config.phoneNumber,
+            audio: true,
+            video: false,
           });
         } else {
           throw new Error(

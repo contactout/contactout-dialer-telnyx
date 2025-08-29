@@ -15,6 +15,7 @@ export interface CallAudioConfig {
   enabled: boolean;
   ringtoneVolume: number;
   statusVolume: number;
+  ringtoneStyle?: "classic" | "modern" | "traditional";
 }
 
 export const useCallAudio = (
@@ -23,6 +24,7 @@ export const useCallAudio = (
     enabled: true,
     ringtoneVolume: 0.3,
     statusVolume: 0.25,
+    ringtoneStyle: "modern",
   }
 ) => {
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -69,7 +71,100 @@ export const useCallAudio = (
 
     const now = audioContextRef.current.currentTime;
 
-    // Standard phone ringtone frequencies (used worldwide)
+    // Modern ringtone frequencies that sound more authentic
+    const freq1 = 440; // A4 note (more pleasant)
+    const freq2 = 554; // C#5 note (harmonious with A4)
+
+    // Create oscillators for the two-tone ringtone
+    const osc1 = audioContextRef.current.createOscillator();
+    const osc2 = audioContextRef.current.createOscillator();
+    const gain = audioContextRef.current.createGain();
+
+    // Set frequencies and waveform type
+    osc1.frequency.setValueAtTime(freq1, now);
+    osc2.frequency.setValueAtTime(freq2, now);
+    osc1.type = "sine";
+    osc2.type = "sine";
+
+    // Connect audio nodes
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(audioContextRef.current.destination);
+
+    // Authentic ringtone pattern: 2 seconds on, 4 seconds off
+    // This matches traditional phone ringtone timing
+    const ringDuration = 2.0; // 2 seconds of ringing
+    const silenceDuration = 4.0; // 4 seconds of silence
+    const totalCycle = ringDuration + silenceDuration;
+
+    // Create smooth envelope for natural sound with proper attack and decay
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(config.ringtoneVolume, now + 0.1); // Gentle fade in
+    gain.gain.setValueAtTime(config.ringtoneVolume, now + ringDuration - 0.15); // Hold volume
+    gain.gain.linearRampToValueAtTime(0, now + ringDuration); // Gentle fade out
+
+    // Start and stop oscillators
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + ringDuration);
+    osc2.stop(now + ringDuration);
+
+    return totalCycle;
+  }, [config.enabled, config.ringtoneVolume]);
+
+  // Alternative modern ringtone (more pleasant frequencies)
+  const playModernRingtone = useCallback(() => {
+    if (!audioContextRef.current || !config.enabled) return;
+
+    const now = audioContextRef.current.currentTime;
+
+    // Pleasant musical frequencies for modern ringtone
+    const freq1 = 523; // C5 note
+    const freq2 = 659; // E5 note (major third - harmonious)
+
+    // Create oscillators for the two-tone ringtone
+    const osc1 = audioContextRef.current.createOscillator();
+    const osc2 = audioContextRef.current.createOscillator();
+    const gain = audioContextRef.current.createGain();
+
+    // Set frequencies and waveform type
+    osc1.frequency.setValueAtTime(freq1, now);
+    osc2.frequency.setValueAtTime(freq2, now);
+    osc1.type = "sine";
+    osc2.type = "sine";
+
+    // Connect audio nodes
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(audioContextRef.current.destination);
+
+    // Modern ringtone pattern: 1.5 seconds on, 3 seconds off
+    const ringDuration = 1.5; // 1.5 seconds of ringing
+    const silenceDuration = 3.0; // 3 seconds of silence
+    const totalCycle = ringDuration + silenceDuration;
+
+    // Create smooth envelope with gentle attack and decay
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(config.ringtoneVolume, now + 0.08); // Quick fade in
+    gain.gain.setValueAtTime(config.ringtoneVolume, now + ringDuration - 0.12); // Hold volume
+    gain.gain.linearRampToValueAtTime(0, now + ringDuration); // Gentle fade out
+
+    // Start and stop oscillators
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + ringDuration);
+    osc2.stop(now + ringDuration);
+
+    return totalCycle;
+  }, [config.enabled, config.ringtoneVolume]);
+
+  // Traditional North American ringtone (480Hz + 620Hz with proper timing)
+  const playTraditionalRingtone = useCallback(() => {
+    if (!audioContextRef.current || !config.enabled) return;
+
+    const now = audioContextRef.current.currentTime;
+
+    // Standard North American ringtone frequencies
     const freq1 = 480; // Lower frequency (Hz)
     const freq2 = 620; // Higher frequency (Hz)
 
@@ -89,17 +184,16 @@ export const useCallAudio = (
     osc2.connect(gain);
     gain.connect(audioContextRef.current.destination);
 
-    // Classic ringtone pattern: 2 seconds on, 4 seconds off
-    // This matches traditional phone ringtone timing
+    // Traditional ringtone pattern: 2 seconds on, 4 seconds off
     const ringDuration = 2.0; // 2 seconds of ringing
     const silenceDuration = 4.0; // 4 seconds of silence
     const totalCycle = ringDuration + silenceDuration;
 
     // Create smooth envelope for natural sound
     gain.gain.setValueAtTime(0, now);
-    gain.gain.linearRampToValueAtTime(config.ringtoneVolume, now + 0.05); // Fade in quickly
-    gain.gain.setValueAtTime(config.ringtoneVolume, now + ringDuration - 0.05); // Hold volume
-    gain.gain.linearRampToValueAtTime(0, now + ringDuration); // Fade out
+    gain.gain.linearRampToValueAtTime(config.ringtoneVolume, now + 0.1); // Gentle fade in
+    gain.gain.setValueAtTime(config.ringtoneVolume, now + ringDuration - 0.15); // Hold volume
+    gain.gain.linearRampToValueAtTime(0, now + ringDuration); // Gentle fade out
 
     // Start and stop oscillators
     osc1.start(now);
@@ -315,10 +409,34 @@ export const useCallAudio = (
 
       switch (audioType) {
         case "ringing":
-          const cycleDuration = playClassicRingtone();
+          let cycleDuration: number | undefined;
+          switch (config.ringtoneStyle) {
+            case "classic":
+              cycleDuration = playClassicRingtone();
+              break;
+            case "traditional":
+              cycleDuration = playTraditionalRingtone();
+              break;
+            case "modern":
+            default:
+              cycleDuration = playModernRingtone();
+              break;
+          }
+
           if (cycleDuration) {
             ringtoneIntervalRef.current = setInterval(() => {
-              playClassicRingtone();
+              switch (config.ringtoneStyle) {
+                case "classic":
+                  playClassicRingtone();
+                  break;
+                case "traditional":
+                  playTraditionalRingtone();
+                  break;
+                case "modern":
+                default:
+                  playModernRingtone();
+                  break;
+              }
             }, cycleDuration * 1000);
           }
           break;
@@ -357,6 +475,8 @@ export const useCallAudio = (
       config.enabled,
       cleanupAudio,
       playClassicRingtone,
+      playModernRingtone,
+      playTraditionalRingtone,
       playConnectingSound,
       playCallConnectedSound,
       playCallEndedSound,
@@ -388,6 +508,8 @@ export const useCallAudio = (
     cleanupAudio,
     // Individual sound functions for direct control
     playClassicRingtone,
+    playModernRingtone,
+    playTraditionalRingtone,
     playBusyTone,
     playErrorTone,
     playCallConnectedSound,

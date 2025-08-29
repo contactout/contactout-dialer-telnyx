@@ -247,7 +247,7 @@ export default function Home() {
   }
 
   const dialPadComponent = (
-    <div className="w-full min-h-[600px] flex flex-col">
+    <div className="w-full flex flex-col">
       {/* User Info, Status Indicators, and Settings Row */}
       <div className="mb-4 flex justify-between items-center">
         <div className="text-sm text-gray-600">
@@ -374,7 +374,6 @@ export default function Home() {
             onDigitPress={logic.handleDigitPress}
             onBackspace={logic.handleBackspace}
             onCall={logic.handleCall}
-            onHangup={logic.handleHangup}
             onClear={logic.handleClearNumber}
             isCallActive={telnyxActions.isCallActive}
             isConnecting={telnyxActions.isConnecting}

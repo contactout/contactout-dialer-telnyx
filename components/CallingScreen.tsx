@@ -32,6 +32,7 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
     enabled: true,
     ringtoneVolume: 0.3,
     statusVolume: 0.25,
+    ringtoneStyle: "modern", // Use modern ringtone by default
   });
 
   // Initialize audio context
