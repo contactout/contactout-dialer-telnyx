@@ -319,8 +319,8 @@ export class DatabaseService {
 
         if (error) throw error;
 
-        // Update user statistics
-        await this.updateUserStats(callData.user_id, callData.status);
+        // Note: User statistics are now calculated directly from calls table
+        // No need to manually update user stats
 
         console.log("Call tracked successfully:", {
           user_id: callData.user_id,
@@ -379,8 +379,8 @@ export class DatabaseService {
 
       if (error) throw error;
 
-      // Also update user stats to include the new costs
-      await this.updateUserStatsWithCosts(callControlId, costBreakdown);
+      // Note: User statistics are now calculated directly from calls table
+      // No need to manually update user stats
     } catch (error) {
       console.error("Error updating call costs:", error);
       // Don't throw - we don't want cost updates to break the main functionality
@@ -503,13 +503,64 @@ export class DatabaseService {
   // Get user statistics
   static async getUserStats(): Promise<UserStats[]> {
     try {
-      const { data, error } = await supabase
+      // Get all users first
+      const { data: users, error: usersError } = await supabase
         .from("users")
-        .select("*")
-        .order("total_calls", { ascending: false });
+        .select("id, email, full_name, created_at, last_active, role");
 
-      if (error) throw error;
-      return data || [];
+      if (usersError) throw usersError;
+
+      // Get call statistics for each user from the calls table
+      const { data: calls, error: callsError } = await supabase
+        .from("calls")
+        .select("user_id, status, voice_cost, sip_trunking_cost, total_cost");
+
+      if (callsError) throw callsError;
+
+      // Calculate statistics for each user
+      const userStats: UserStats[] =
+        users?.map((user) => {
+          const userCalls =
+            calls?.filter((call) => call.user_id === user.id) || [];
+
+          const totalCalls = userCalls.length;
+          const successfulCalls = userCalls.filter(
+            (call) => call.status === "completed"
+          ).length;
+          const failedCalls = userCalls.filter(
+            (call) => call.status === "failed"
+          ).length;
+
+          const totalVoiceCost = userCalls.reduce(
+            (sum, call) => sum + (call.voice_cost || 0),
+            0
+          );
+          const totalSipTrunkingCost = userCalls.reduce(
+            (sum, call) => sum + (call.sip_trunking_cost || 0),
+            0
+          );
+          const totalCost = userCalls.reduce(
+            (sum, call) => sum + (call.total_cost || 0),
+            0
+          );
+
+          return {
+            id: user.id,
+            email: user.email,
+            full_name: user.full_name,
+            total_calls: totalCalls,
+            successful_calls: successfulCalls,
+            failed_calls: failedCalls,
+            last_active: user.last_active,
+            created_at: user.created_at,
+            total_voice_cost: totalVoiceCost,
+            total_sip_trunking_cost: totalSipTrunkingCost,
+            total_cost: totalCost,
+          };
+        }) || [];
+
+      // Sort by total calls descending
+      return userStats.sort((a, b) => b.total_calls - a.total_calls);
     } catch (error) {
       console.error("Error fetching user stats:", error);
       return [];
@@ -532,10 +583,10 @@ export class DatabaseService {
 
       if (callsError) throw callsError;
 
-      // Get user stats
+      // Get user stats for active users calculation
       const { data: users, error: usersError } = await supabase
         .from("users")
-        .select("*");
+        .select("id, last_active");
 
       if (usersError) throw usersError;
 

@@ -113,44 +113,8 @@ CREATE POLICY "Admins can update all calls" ON calls
         )
     );
 
--- Create function to update user stats when calls are inserted/updated
-CREATE OR REPLACE FUNCTION update_user_stats_on_call()
-RETURNS TRIGGER AS $$
-BEGIN
-    -- Update user stats when a new call is inserted or updated
-    INSERT INTO users (id, email, total_calls, successful_calls, failed_calls, last_active, created_at, total_voice_cost, total_sip_trunking_cost, total_cost)
-    VALUES (
-        NEW.user_id,
-        (SELECT email FROM auth.users WHERE id = NEW.user_id),
-        1,
-        CASE WHEN NEW.status = 'completed' THEN 1 ELSE 0 END,
-        CASE WHEN NEW.status = 'failed' THEN 1 ELSE 0 END,
-        NOW(),
-        NOW(),
-        COALESCE(NEW.voice_cost, 0),
-        COALESCE(NEW.sip_trunking_cost, 0),
-        COALESCE(NEW.total_cost, 0)
-    )
-    ON CONFLICT (id) DO UPDATE SET
-        total_calls = users.total_calls + 1,
-        successful_calls = users.successful_calls + CASE WHEN NEW.status = 'completed' THEN 1 ELSE 0 END,
-        failed_calls = users.failed_calls + CASE WHEN NEW.status = 'failed' THEN 1 ELSE 0 END,
-        last_active = NOW(),
-        total_voice_cost = users.total_voice_cost + COALESCE(NEW.voice_cost, 0),
-        total_sip_trunking_cost = users.total_sip_trunking_cost + COALESCE(NEW.sip_trunking_cost, 0),
-        total_cost = users.total_cost + COALESCE(NEW.total_cost, 0),
-        updated_at = NOW();
-    
-    RETURN NEW;
-END;
-$$ LANGUAGE plpgsql SECURITY DEFINER;
-
--- Create trigger to automatically update user stats
-DROP TRIGGER IF EXISTS trigger_update_user_stats ON calls;
-CREATE TRIGGER trigger_update_user_stats
-    AFTER INSERT OR UPDATE ON calls
-    FOR EACH ROW
-    EXECUTE FUNCTION update_user_stats_on_call();
+-- Note: User statistics are now calculated on-demand from the calls table in the application
+-- This prevents duplicate counting issues that occurred with the previous trigger-based approach
 
 -- Create function to automatically create user record when auth.users record is created
 CREATE OR REPLACE FUNCTION handle_new_user()
