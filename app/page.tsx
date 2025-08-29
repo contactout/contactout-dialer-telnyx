@@ -49,6 +49,9 @@ export default function Home() {
     clearHistory,
     removeCall,
     formatTimestamp,
+    loading: callHistoryLoading,
+    error: callHistoryError,
+    refreshHistory,
   } = useCallHistory();
 
   // Telnyx configuration from environment variables
@@ -107,10 +110,13 @@ export default function Home() {
     telnyxConfig,
     user?.id,
     (status, phoneNumber, duration) => {
-      // Update call history with the correct status and duration
-      if (phoneNumber) {
-        addCall(phoneNumber, status, duration);
-      }
+      // Call history is now automatically tracked in the database
+      // Refresh the call history to show the new call
+      console.log("Call completed:", { status, phoneNumber, duration });
+      // Refresh call history after a short delay to ensure database update
+      setTimeout(() => {
+        refreshHistory();
+      }, 1000);
     }
   );
 
@@ -281,16 +287,16 @@ export default function Home() {
     setShowCallHistory(false);
   };
 
-  const handleRemoveCall = (timestamp: number) => {
-    removeCall(timestamp);
+  const handleRemoveCall = async (callId: string) => {
+    await removeCall(callId);
     // Clear error if this was the last call in history
     if (callHistory.length <= 1) {
       clearError();
     }
   };
 
-  const handleClearHistory = () => {
-    clearHistory();
+  const handleClearHistory = async () => {
+    await clearHistory();
     // Also clear any error messages when clearing history
     clearError();
   };
@@ -593,6 +599,8 @@ export default function Home() {
           onRemoveCall={handleRemoveCall}
           onClearHistory={handleClearHistory}
           formatTimestamp={formatTimestamp}
+          loading={callHistoryLoading}
+          error={callHistoryError}
         />
       ) : (
         <div className="flex-1 flex flex-col justify-between">

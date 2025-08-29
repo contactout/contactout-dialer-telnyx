@@ -1,148 +1,106 @@
-import { useState, useEffect, useCallback, useRef } from "react";
-import { TelnyxCostCalculator } from "@/lib/costCalculator";
+import { useState, useEffect, useCallback } from "react";
+import { supabase } from "@/lib/supabase";
+import { useAuth } from "@/contexts/AuthContext";
 
 export interface CallRecord {
-  phoneNumber: string;
-  timestamp: number;
+  id: string;
+  phone_number: string;
+  timestamp: string;
   status: "completed" | "failed" | "missed" | "incoming";
   duration?: number;
-  voiceCost?: number;
-  sipTrunkingCost?: number;
-  totalCost?: number;
+  voice_cost?: number;
+  sip_trunking_cost?: number;
+  total_cost?: number;
   currency?: string;
-  destinationCountry?: string;
+  destination_country?: string;
 }
 
-const STORAGE_KEY = "call_history";
-const MAX_HISTORY_SIZE = 10; // Keep last 10 calls
-
 export const useCallHistory = () => {
+  const { user } = useAuth();
   const [callHistory, setCallHistory] = useState<CallRecord[]>([]);
-  const saveTimeoutRef = useRef<NodeJS.Timeout | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState<string | null>(null);
 
-  // Load call history from localStorage on mount
-  useEffect(() => {
+  // Fetch call history from Supabase
+  const fetchCallHistory = useCallback(async () => {
+    if (!user?.id) return;
+
     try {
-      const stored = localStorage.getItem(STORAGE_KEY);
-      if (stored) {
-        const parsed = JSON.parse(stored);
-        setCallHistory(parsed);
-      }
-    } catch (error) {
-      console.error("Failed to load call history from localStorage:", error);
-    }
-  }, []);
+      setLoading(true);
+      setError(null);
 
-  // Save call history to localStorage with debouncing to prevent excessive writes
+      const { data, error: fetchError } = await supabase
+        .from("calls")
+        .select("*")
+        .eq("user_id", user.id)
+        .order("timestamp", { ascending: false })
+        .limit(20); // Keep last 20 calls for performance
+
+      if (fetchError) throw fetchError;
+
+      setCallHistory(data || []);
+    } catch (err: any) {
+      console.error("Failed to fetch call history:", err);
+      setError(err.message || "Failed to load call history");
+    } finally {
+      setLoading(false);
+    }
+  }, [user?.id]);
+
+  // Load call history on mount and when user changes
   useEffect(() => {
-    // Clear any existing timeout
-    if (saveTimeoutRef.current) {
-      clearTimeout(saveTimeoutRef.current);
-    }
+    fetchCallHistory();
+  }, [fetchCallHistory]);
 
-    // Set a new timeout to save after 500ms of no changes
-    saveTimeoutRef.current = setTimeout(() => {
-      try {
-        // Only save if there's actual call history to save
-        if (callHistory.length > 0) {
-          localStorage.setItem(STORAGE_KEY, JSON.stringify(callHistory));
-        } else {
-          // If no call history, remove the item from localStorage
-          localStorage.removeItem(STORAGE_KEY);
-        }
-      } catch (error) {
-        console.error("Failed to save call history to localStorage:", error);
-      }
-    }, 500);
-
-    // Cleanup timeout on unmount
-    return () => {
-      if (saveTimeoutRef.current) {
-        clearTimeout(saveTimeoutRef.current);
-      }
-    };
-  }, [callHistory]);
-
-  // Add a new call to history
-  const addCall = useCallback(
-    (phoneNumber: string, status: CallRecord["status"], duration?: number) => {
-      // Calculate costs based on status and duration
-      let voiceCost = 0;
-      let sipTrunkingCost = 0;
-      let totalCost = 0;
-      const destinationCountry =
-        TelnyxCostCalculator.getCountryFromPhoneNumber(phoneNumber);
-
-      if (status === "completed" && duration) {
-        const costBreakdown = TelnyxCostCalculator.calculateCompletedCallCost(
-          duration,
-          destinationCountry
-        );
-        voiceCost = costBreakdown.voiceCost;
-        sipTrunkingCost = costBreakdown.sipTrunkingCost;
-        totalCost = costBreakdown.totalCost;
-      } else if (status === "failed" || status === "missed") {
-        const costBreakdown =
-          TelnyxCostCalculator.calculateFailedCallCost(destinationCountry);
-        voiceCost = costBreakdown.voiceCost;
-        sipTrunkingCost = costBreakdown.sipTrunkingCost;
-        totalCost = costBreakdown.totalCost;
-      }
-
-      const newCall: CallRecord = {
-        phoneNumber,
-        timestamp: Date.now(),
-        status,
-        duration,
-        voiceCost,
-        sipTrunkingCost,
-        totalCost,
-        currency: "USD",
-        destinationCountry,
-      };
-
-      setCallHistory((prev) => {
-        // Remove duplicate entries for the same number
-        const filtered = prev.filter(
-          (call) => call.phoneNumber !== phoneNumber
-        );
-
-        // Add new call at the beginning
-        const updated = [newCall, ...filtered];
-
-        // Keep only the last MAX_HISTORY_SIZE calls
-        const final = updated.slice(0, MAX_HISTORY_SIZE);
-
-        return final;
-      });
-    },
-    []
-  );
+  // Refresh call history
+  const refreshHistory = useCallback(() => {
+    fetchCallHistory();
+  }, [fetchCallHistory]);
 
   // Get the last dialed number
   const getLastDialed = useCallback(() => {
-    return callHistory.length > 0 ? callHistory[0].phoneNumber : null;
+    return callHistory.length > 0 ? callHistory[0].phone_number : null;
   }, [callHistory]);
 
-  // Clear all call history
-  const clearHistory = useCallback(() => {
-    setCallHistory([]);
+  // Clear all call history (remove from database)
+  const clearHistory = useCallback(async () => {
+    if (!user?.id) return;
+
     try {
-      localStorage.removeItem(STORAGE_KEY);
-    } catch (error) {
-      console.error("Failed to clear call history from localStorage:", error);
+      const { error: deleteError } = await supabase
+        .from("calls")
+        .delete()
+        .eq("user_id", user.id);
+
+      if (deleteError) throw deleteError;
+
+      setCallHistory([]);
+    } catch (err: any) {
+      console.error("Failed to clear call history:", err);
+      setError(err.message || "Failed to clear call history");
+    }
+  }, [user?.id]);
+
+  // Remove a specific call from history
+  const removeCall = useCallback(async (callId: string) => {
+    try {
+      const { error: deleteError } = await supabase
+        .from("calls")
+        .delete()
+        .eq("id", callId);
+
+      if (deleteError) throw deleteError;
+
+      // Remove from local state
+      setCallHistory((prev) => prev.filter((call) => call.id !== callId));
+    } catch (err: any) {
+      console.error("Failed to remove call:", err);
+      setError(err.message || "Failed to remove call");
     }
   }, []);
 
-  // Remove a specific call from history
-  const removeCall = useCallback((timestamp: number) => {
-    setCallHistory((prev) =>
-      prev.filter((call) => call.timestamp !== timestamp)
-    );
-  }, []);
-
   // Format timestamp for display
-  const formatTimestamp = useCallback((timestamp: number) => {
+  const formatTimestamp = useCallback((timestamp: string) => {
     const date = new Date(timestamp);
     const now = new Date();
     const diffInHours = (now.getTime() - date.getTime()) / (1000 * 60 * 60);
@@ -160,10 +118,13 @@ export const useCallHistory = () => {
 
   return {
     callHistory,
-    addCall,
+    loading,
+    error,
+    addCall: refreshHistory, // Since calls are tracked automatically, just refresh
     getLastDialed,
     clearHistory,
     removeCall,
     formatTimestamp,
+    refreshHistory,
   };
 };

@@ -138,6 +138,9 @@ export const useTelnyxWebRTC = (
   const [callState, setCallState] = useState<CallState>("idle");
   const [callControlId, setCallControlId] = useState<string | null>(null);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
+  const [currentDialedNumber, setCurrentDialedNumber] = useState<string | null>(
+    null
+  );
 
   // Audio state
   const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState(false);
@@ -404,13 +407,12 @@ export const useTelnyxWebRTC = (
       if (!userId) return;
 
       // Get the actual phone number that was dialed
-      // The call object might not have phoneNumber, so we need to get it from the current call state
-      // Also allow phoneNumberOverride for cases where we know the number but the call object doesn't have it
+      // Use the stored dialed number to ensure we track the correct number
       const phoneNumber =
         phoneNumberOverride ||
+        currentDialedNumber ||
         call.phoneNumber ||
-        currentCall?.phoneNumber ||
-        config.phoneNumber;
+        currentCall?.phoneNumber;
 
       // Debug: Log the call object and tracking data
       console.log("Tracking call to database:", {
@@ -573,14 +575,11 @@ export const useTelnyxWebRTC = (
                 call,
                 "failed",
                 Math.floor(callDuration),
-                call.phoneNumber || config.phoneNumber
+                currentDialedNumber || undefined
               );
 
               // Notify status
-              notifyCallStatus(
-                "failed",
-                call.phoneNumber || config.phoneNumber
-              );
+              notifyCallStatus("failed", currentDialedNumber || undefined);
 
               // Clean up call state immediately
               setCurrentCall(null);
@@ -622,17 +621,17 @@ export const useTelnyxWebRTC = (
 
             case "hangup":
               console.log("📞 Call hangup detected via primary handler");
-              handleCallHangup(call, call.phoneNumber || config.phoneNumber);
+              handleCallHangup(call, currentDialedNumber || "");
               break;
 
             case "destroy":
               console.log("📞 Call destroy detected via primary handler");
-              handleCallDestroy(call, call.phoneNumber || config.phoneNumber);
+              handleCallDestroy(call, currentDialedNumber || "");
               break;
 
             case "failed":
               console.log("📞 Call failed detected via primary handler");
-              handleCallFailed(call, call.phoneNumber || config.phoneNumber);
+              handleCallFailed(call, currentDialedNumber || "");
               break;
           }
         }
@@ -721,6 +720,7 @@ export const useTelnyxWebRTC = (
       setCurrentCall(call);
       setCallControlId(call.id);
       setCallStartTime(Date.now());
+      setCurrentDialedNumber(phoneNumber);
 
       // Store call start time locally to avoid state update delays
       const localCallStartTime = Date.now();
@@ -782,6 +782,7 @@ export const useTelnyxWebRTC = (
           setCurrentCall(null);
           setCallControlId(null);
           setCallStartTime(null);
+          setCurrentDialedNumber(null);
 
           // Stop monitoring
           clearInterval(callStateMonitor);
@@ -915,6 +916,7 @@ export const useTelnyxWebRTC = (
       setCurrentCall(null);
       setCallControlId(null);
       setCallStartTime(null);
+      setCurrentDialedNumber(null);
     },
     [callStartTime, transitionCallState, trackCall, notifyCallStatus]
   );
@@ -973,6 +975,7 @@ export const useTelnyxWebRTC = (
       setCurrentCall(null);
       setCallControlId(null);
       setCallStartTime(null);
+      setCurrentDialedNumber(null);
     },
     [callStartTime, transitionCallState, trackCall, notifyCallStatus]
   );
@@ -1012,6 +1015,7 @@ export const useTelnyxWebRTC = (
       setCurrentCall(null);
       setCallControlId(null);
       setCallStartTime(null);
+      setCurrentDialedNumber(null);
     },
     [callStartTime, transitionCallState, trackCall, notifyCallStatus]
   );
@@ -1379,6 +1383,7 @@ export const useTelnyxWebRTC = (
     setCurrentCall(null);
     setCallControlId(null);
     setCallStartTime(null);
+    setCurrentDialedNumber(null);
   }, [transitionCallState]);
 
   const debugAudioSetup = useCallback(() => {
