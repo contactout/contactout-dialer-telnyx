@@ -6,6 +6,7 @@ import PhoneMockup from "@/components/PhoneMockup";
 import LoginScreen from "@/components/LoginScreen";
 import CallingScreen from "@/components/CallingScreen";
 import AudioTest from "@/components/AudioTest";
+import AudioSettings from "@/components/AudioSettings";
 import SettingsDropdown from "@/components/SettingsDropdown";
 import CallHistory from "@/components/CallHistory";
 import ErrorPopup from "@/components/ErrorPopup";
@@ -19,6 +20,7 @@ import { DatabaseService } from "@/lib/database";
 export default function Home() {
   const [phoneNumber, setPhoneNumber] = useState("");
   const [showAudioTest, setShowAudioTest] = useState(false);
+  const [showAudioSettings, setShowAudioSettings] = useState(false);
   const [showDTMFSettings, setShowDTMFSettings] = useState(false);
   const [showCallHistory, setShowCallHistory] = useState(false);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
@@ -385,6 +387,7 @@ export default function Home() {
 
             <SettingsDropdown
               onTestMicrophone={() => setShowAudioTest(true)}
+              onAudioSettings={() => setShowAudioSettings(true)}
               onDebugAudio={debugAudioSetup}
               onDTMFSettings={() => setShowDTMFSettings(true)}
               onSignOut={signOut}
@@ -510,6 +513,7 @@ export default function Home() {
 
           <SettingsDropdown
             onTestMicrophone={() => setShowAudioTest(true)}
+            onAudioSettings={() => setShowAudioSettings(true)}
             onDebugAudio={debugAudioSetup}
             onDTMFSettings={() => setShowDTMFSettings(true)}
             onSignOut={signOut}
@@ -690,6 +694,14 @@ export default function Home() {
       )}
       {/* Audio Test Modal */}
       {showAudioTest && <AudioTest onClose={() => setShowAudioTest(false)} />}
+
+      {/* Audio Settings Modal */}
+      {showAudioSettings && (
+        <AudioSettings
+          isVisible={showAudioSettings}
+          onClose={() => setShowAudioSettings(false)}
+        />
+      )}
 
       {/* DTMF Settings Modal */}
       {showDTMFSettings && (

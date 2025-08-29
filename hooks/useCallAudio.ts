@@ -1,0 +1,397 @@
+import { useCallback, useRef, useEffect } from "react";
+
+// Audio feedback types for different call states
+export type CallAudioType =
+  | "ringing"
+  | "connecting"
+  | "connected"
+  | "ended"
+  | "failed"
+  | "busy"
+  | "error";
+
+export interface CallAudioConfig {
+  volume: number;
+  enabled: boolean;
+  ringtoneVolume: number;
+  statusVolume: number;
+}
+
+export const useCallAudio = (
+  config: CallAudioConfig = {
+    volume: 0.4,
+    enabled: true,
+    ringtoneVolume: 0.3,
+    statusVolume: 0.25,
+  }
+) => {
+  const audioContextRef = useRef<AudioContext | null>(null);
+  const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const busyToneIntervalRef = useRef<NodeJS.Timeout | null>(null);
+  const errorToneIntervalRef = useRef<NodeJS.Timeout | null>(null);
+
+  // Initialize audio context
+  const initializeAudioContext = useCallback(() => {
+    try {
+      if (!audioContextRef.current) {
+        audioContextRef.current = new (window.AudioContext ||
+          (window as any).webkitAudioContext)();
+
+        // Resume if suspended
+        if (audioContextRef.current.state === "suspended") {
+          audioContextRef.current.resume();
+        }
+      }
+    } catch (error) {
+      console.error("Failed to initialize audio context:", error);
+    }
+  }, []);
+
+  // Cleanup all audio
+  const cleanupAudio = useCallback(() => {
+    if (ringtoneIntervalRef.current) {
+      clearInterval(ringtoneIntervalRef.current);
+      ringtoneIntervalRef.current = null;
+    }
+    if (busyToneIntervalRef.current) {
+      clearInterval(busyToneIntervalRef.current);
+      busyToneIntervalRef.current = null;
+    }
+    if (errorToneIntervalRef.current) {
+      clearInterval(errorToneIntervalRef.current);
+      errorToneIntervalRef.current = null;
+    }
+  }, []);
+
+  // Classic phone ringtone (2-tone alternating pattern)
+  const playClassicRingtone = useCallback(() => {
+    if (!audioContextRef.current || !config.enabled) return;
+
+    const now = audioContextRef.current.currentTime;
+
+    // Standard phone ringtone frequencies (used worldwide)
+    const freq1 = 480; // Lower frequency (Hz)
+    const freq2 = 620; // Higher frequency (Hz)
+
+    // Create oscillators for the two-tone ringtone
+    const osc1 = audioContextRef.current.createOscillator();
+    const osc2 = audioContextRef.current.createOscillator();
+    const gain = audioContextRef.current.createGain();
+
+    // Set frequencies and waveform type
+    osc1.frequency.setValueAtTime(freq1, now);
+    osc2.frequency.setValueAtTime(freq2, now);
+    osc1.type = "sine";
+    osc2.type = "sine";
+
+    // Connect audio nodes
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(audioContextRef.current.destination);
+
+    // Classic ringtone pattern: 2 seconds on, 4 seconds off
+    // This matches traditional phone ringtone timing
+    const ringDuration = 2.0; // 2 seconds of ringing
+    const silenceDuration = 4.0; // 4 seconds of silence
+    const totalCycle = ringDuration + silenceDuration;
+
+    // Create smooth envelope for natural sound
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(config.ringtoneVolume, now + 0.05); // Fade in quickly
+    gain.gain.setValueAtTime(config.ringtoneVolume, now + ringDuration - 0.05); // Hold volume
+    gain.gain.linearRampToValueAtTime(0, now + ringDuration); // Fade out
+
+    // Start and stop oscillators
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + ringDuration);
+    osc2.stop(now + ringDuration);
+
+    return totalCycle;
+  }, [config.enabled, config.ringtoneVolume]);
+
+  // Busy tone (when call fails or number is busy)
+  const playBusyTone = useCallback(() => {
+    if (!audioContextRef.current || !config.enabled) return;
+
+    const now = audioContextRef.current.currentTime;
+
+    // Busy tone: 480Hz + 620Hz alternating every 0.5 seconds
+    const freq1 = 480;
+    const freq2 = 620;
+
+    const osc1 = audioContextRef.current.createOscillator();
+    const osc2 = audioContextRef.current.createOscillator();
+    const gain = audioContextRef.current.createGain();
+
+    osc1.frequency.setValueAtTime(freq1, now);
+    osc2.frequency.setValueAtTime(freq2, now);
+    osc1.type = "sine";
+    osc2.type = "sine";
+
+    osc1.connect(gain);
+    osc2.connect(gain);
+    gain.connect(audioContextRef.current.destination);
+
+    // Busy tone pattern: 0.5s on, 0.5s off
+    const toneDuration = 0.5;
+    const silenceDuration = 0.5;
+    const totalCycle = toneDuration + silenceDuration;
+
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(config.statusVolume, now + 0.01);
+    gain.gain.setValueAtTime(config.statusVolume, now + toneDuration - 0.01);
+    gain.gain.linearRampToValueAtTime(0, now + toneDuration);
+
+    osc1.start(now);
+    osc2.start(now);
+    osc1.stop(now + toneDuration);
+    osc2.stop(now + toneDuration);
+
+    return totalCycle;
+  }, [config.enabled, config.statusVolume]);
+
+  // Error tone (for connection failures)
+  const playErrorTone = useCallback(() => {
+    if (!audioContextRef.current || !config.enabled) return;
+
+    const now = audioContextRef.current.currentTime;
+
+    // Error tone: three descending beeps
+    const frequencies = [800, 600, 400];
+    const beepDuration = 0.2;
+    const silenceBetweenBeeps = 0.1;
+
+    frequencies.forEach((freq, index) => {
+      const startTime = now + index * (beepDuration + silenceBetweenBeeps);
+
+      const osc = audioContextRef.current!.createOscillator();
+      const gain = audioContextRef.current!.createGain();
+
+      osc.frequency.setValueAtTime(freq, startTime);
+      osc.type = "sine";
+
+      osc.connect(gain);
+      gain.connect(audioContextRef.current!.destination);
+
+      gain.gain.setValueAtTime(0, startTime);
+      gain.gain.linearRampToValueAtTime(config.statusVolume, startTime + 0.01);
+      gain.gain.setValueAtTime(
+        config.statusVolume,
+        startTime + beepDuration - 0.01
+      );
+      gain.gain.linearRampToValueAtTime(0, startTime + beepDuration);
+
+      osc.start(startTime);
+      osc.stop(startTime + beepDuration);
+    });
+  }, [config.enabled, config.statusVolume]);
+
+  // Call connected sound (when call is answered)
+  const playCallConnectedSound = useCallback(() => {
+    if (!audioContextRef.current || !config.enabled) return;
+
+    try {
+      const now = audioContextRef.current.currentTime;
+
+      // Two ascending tones to indicate success
+      const freq1 = 800;
+      const freq2 = 1000;
+
+      const osc1 = audioContextRef.current.createOscillator();
+      const osc2 = audioContextRef.current.createOscillator();
+      const gain = audioContextRef.current.createGain();
+
+      osc1.frequency.setValueAtTime(freq1, now);
+      osc2.frequency.setValueAtTime(freq2, now + 0.1);
+      osc1.type = "sine";
+      osc2.type = "sine";
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(audioContextRef.current.destination);
+
+      // First tone
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(config.statusVolume, now + 0.01);
+      gain.gain.setValueAtTime(config.statusVolume, now + 0.09);
+      gain.gain.linearRampToValueAtTime(0, now + 0.1);
+
+      // Second tone
+      gain.gain.setValueAtTime(0, now + 0.1);
+      gain.gain.linearRampToValueAtTime(config.statusVolume, now + 0.11);
+      gain.gain.setValueAtTime(config.statusVolume, now + 0.19);
+      gain.gain.linearRampToValueAtTime(0, now + 0.2);
+
+      osc1.start(now);
+      osc1.stop(now + 0.1);
+      osc2.start(now + 0.1);
+      osc2.stop(now + 0.2);
+    } catch (error) {
+      console.error("Failed to play call connected sound:", error);
+    }
+  }, [config.enabled, config.statusVolume]);
+
+  // Call ended sound
+  const playCallEndedSound = useCallback(() => {
+    if (!audioContextRef.current || !config.enabled) return;
+
+    try {
+      const now = audioContextRef.current.currentTime;
+
+      // Two descending tones to indicate call end
+      const freq1 = 1000;
+      const freq2 = 600;
+
+      const osc1 = audioContextRef.current.createOscillator();
+      const osc2 = audioContextRef.current.createOscillator();
+      const gain = audioContextRef.current.createGain();
+
+      osc1.frequency.setValueAtTime(freq1, now);
+      osc2.frequency.setValueAtTime(freq2, now + 0.1);
+      osc1.type = "sine";
+      osc2.type = "sine";
+
+      osc1.connect(gain);
+      osc2.connect(gain);
+      gain.connect(audioContextRef.current.destination);
+
+      // First tone
+      gain.gain.setValueAtTime(0, now);
+      gain.gain.linearRampToValueAtTime(config.statusVolume, now + 0.01);
+      gain.gain.setValueAtTime(config.statusVolume, now + 0.09);
+      gain.gain.linearRampToValueAtTime(0, now + 0.1);
+
+      // Second tone
+      gain.gain.setValueAtTime(0, now + 0.1);
+      gain.gain.linearRampToValueAtTime(config.statusVolume, now + 0.11);
+      gain.gain.setValueAtTime(config.statusVolume, now + 0.19);
+      gain.gain.linearRampToValueAtTime(0, now + 0.2);
+
+      osc1.start(now);
+      osc1.stop(now + 0.1);
+      osc2.start(now + 0.1);
+      osc2.stop(now + 0.2);
+    } catch (error) {
+      console.error("Failed to play call ended sound:", error);
+    }
+  }, [config.enabled, config.statusVolume]);
+
+  // Connecting sound (softer than ringtone)
+  const playConnectingSound = useCallback(() => {
+    if (!audioContextRef.current || !config.enabled) return;
+
+    const now = audioContextRef.current.currentTime;
+
+    // Single soft tone to indicate connecting
+    const freq = 600;
+
+    const osc = audioContextRef.current.createOscillator();
+    const gain = audioContextRef.current.createGain();
+
+    osc.frequency.setValueAtTime(freq, now);
+    osc.type = "sine";
+
+    osc.connect(gain);
+    gain.connect(audioContextRef.current.destination);
+
+    // Soft connecting sound
+    gain.gain.setValueAtTime(0, now);
+    gain.gain.linearRampToValueAtTime(config.statusVolume * 0.5, now + 0.01);
+    gain.gain.setValueAtTime(config.statusVolume * 0.5, now + 0.19);
+    gain.gain.linearRampToValueAtTime(0, now + 0.2);
+
+    osc.start(now);
+    osc.stop(now + 0.2);
+  }, [config.enabled, config.statusVolume]);
+
+  // Main function to play appropriate audio for call state
+  const playCallAudio = useCallback(
+    (audioType: CallAudioType) => {
+      if (!config.enabled) return;
+
+      // Cleanup any existing audio first
+      cleanupAudio();
+
+      switch (audioType) {
+        case "ringing":
+          const cycleDuration = playClassicRingtone();
+          if (cycleDuration) {
+            ringtoneIntervalRef.current = setInterval(() => {
+              playClassicRingtone();
+            }, cycleDuration * 1000);
+          }
+          break;
+
+        case "connecting":
+          playConnectingSound();
+          break;
+
+        case "connected":
+          playCallConnectedSound();
+          break;
+
+        case "ended":
+          playCallEndedSound();
+          break;
+
+        case "failed":
+        case "busy":
+          const busyCycle = playBusyTone();
+          if (busyCycle) {
+            busyToneIntervalRef.current = setInterval(() => {
+              playBusyTone();
+            }, busyCycle * 1000);
+          }
+          break;
+
+        case "error":
+          playErrorTone();
+          break;
+
+        default:
+          break;
+      }
+    },
+    [
+      config.enabled,
+      cleanupAudio,
+      playClassicRingtone,
+      playConnectingSound,
+      playCallConnectedSound,
+      playCallEndedSound,
+      playBusyTone,
+      playErrorTone,
+    ]
+  );
+
+  // Stop all audio
+  const stopAllAudio = useCallback(() => {
+    cleanupAudio();
+  }, [cleanupAudio]);
+
+  // Cleanup on unmount
+  useEffect(() => {
+    return () => {
+      cleanupAudio();
+      if (audioContextRef.current) {
+        audioContextRef.current.close();
+        audioContextRef.current = null;
+      }
+    };
+  }, [cleanupAudio]);
+
+  return {
+    playCallAudio,
+    stopAllAudio,
+    initializeAudioContext,
+    cleanupAudio,
+    // Individual sound functions for direct control
+    playClassicRingtone,
+    playBusyTone,
+    playErrorTone,
+    playCallConnectedSound,
+    playCallEndedSound,
+    playConnectingSound,
+  };
+};

@@ -1,11 +1,5 @@
-import React, { useEffect, useRef } from "react";
-
-// TypeScript declarations for Web Audio API
-declare global {
-  interface Window {
-    webkitAudioContext: typeof AudioContext;
-  }
-}
+import React, { useEffect } from "react";
+import { useCallAudio } from "@/hooks/useCallAudio";
 
 interface CallingScreenProps {
   phoneNumber: string;
@@ -32,89 +26,79 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   callDuration = 0,
   autoRedirectCountdown,
 }) => {
-  const audioContextRef = useRef<AudioContext | null>(null);
-  const oscillatorRef = useRef<OscillatorNode | null>(null);
-  const gainNodeRef = useRef<GainNode | null>(null);
-  const intervalRef = useRef<NodeJS.Timeout | null>(null);
+  // Use the comprehensive audio hook
+  const { playCallAudio, stopAllAudio, initializeAudioContext } = useCallAudio({
+    volume: 0.4,
+    enabled: true,
+    ringtoneVolume: 0.3,
+    statusVolume: 0.25,
+  });
 
+  // Initialize audio context
   useEffect(() => {
-    // Only play ringtone when actually ringing, not when failing
-    if (
-      error ||
-      !isConnecting ||
-      callState === "failed" ||
-      callState === "error"
-    ) {
+    initializeAudioContext();
+  }, [initializeAudioContext]);
+
+  // Audio playback based on call state
+  useEffect(() => {
+    if (error) {
+      // Stop any ongoing audio
+      stopAllAudio();
+
+      // Play error tone for specific error types
+      if (
+        error.includes("failed") ||
+        error.includes("invalid") ||
+        error.includes("unreachable")
+      ) {
+        // Small delay to ensure smooth transition
+        const timer = setTimeout(() => {
+          playCallAudio("error");
+        }, 200);
+        return () => clearTimeout(timer);
+      }
       return;
     }
 
-    // Create audio context and start ringtone
-    const startRingtone = () => {
-      try {
-        audioContextRef.current = new (window.AudioContext ||
-          window.webkitAudioContext)();
-        gainNodeRef.current = audioContextRef.current.createGain();
+    if (!isConnecting) {
+      stopAllAudio();
+      return;
+    }
 
-        // Set up proper phone ringtone pattern
-        const playRingtone = () => {
-          if (!audioContextRef.current || !gainNodeRef.current) return;
+    // Play appropriate audio based on call state
+    if (callState === "ringing") {
+      playCallAudio("ringing");
+    } else if (callState === "trying" || callState === "connecting") {
+      playCallAudio("connecting");
+    }
 
-          const now = audioContextRef.current.currentTime;
-
-          // Create two oscillators for a two-tone ringtone (like traditional phones)
-          const osc1 = audioContextRef.current.createOscillator();
-          const osc2 = audioContextRef.current.createOscillator();
-          const gain = audioContextRef.current.createGain();
-
-          // Connect oscillators to gain node, then to destination
-          osc1.connect(gain);
-          osc2.connect(gain);
-          gain.connect(audioContextRef.current.destination);
-
-          // Set frequencies for two-tone ringtone (common phone frequencies)
-          osc1.frequency.setValueAtTime(480, now); // Lower tone
-          osc2.frequency.setValueAtTime(620, now); // Higher tone
-          osc1.type = "sine";
-          osc2.type = "sine";
-
-          // Create envelope for the ringtone pattern
-          // Ringtone should be on for about 1 second, then off for 2 seconds
-          gain.gain.setValueAtTime(0, now);
-          gain.gain.linearRampToValueAtTime(0.25, now + 0.05); // Fade in
-          gain.gain.setValueAtTime(0.25, now + 0.95); // Hold
-          gain.gain.linearRampToValueAtTime(0, now + 1.0); // Fade out
-
-          // Start and stop oscillators
-          osc1.start(now);
-          osc2.start(now);
-          osc1.stop(now + 1.0);
-          osc2.stop(now + 1.0);
-        };
-
-        // Play ringtone every 3 seconds (1 second ring, 2 seconds silence)
-        intervalRef.current = setInterval(playRingtone, 3000);
-
-        // Play first ringtone immediately
-        playRingtone();
-      } catch (error) {
-        console.error("Failed to create audio context:", error);
-      }
-    };
-
-    startRingtone();
-
-    // Cleanup: stop audio when component unmounts
+    // Cleanup function
     return () => {
-      if (intervalRef.current) {
-        clearInterval(intervalRef.current);
-        intervalRef.current = null;
-      }
-      if (audioContextRef.current) {
-        audioContextRef.current.close();
-        audioContextRef.current = null;
-      }
+      stopAllAudio();
     };
-  }, [error, isConnecting, callState]);
+  }, [error, isConnecting, callState, playCallAudio, stopAllAudio]);
+
+  // Play call connected sound when call becomes active
+  useEffect(() => {
+    if (isCallActive && callState === "answered") {
+      // Small delay to ensure smooth transition
+      const timer = setTimeout(() => {
+        playCallAudio("connected");
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isCallActive, callState, playCallAudio]);
+
+  // Play call ended sound when call ends
+  useEffect(() => {
+    if (!isCallActive && !isConnecting && callState !== "idle") {
+      // Small delay to ensure smooth transition
+      const timer = setTimeout(() => {
+        playCallAudio("ended");
+      }, 100);
+      return () => clearTimeout(timer);
+    }
+  }, [isCallActive, isConnecting, callState, playCallAudio]);
 
   // Get simplified status text
   const getStatusText = () => {

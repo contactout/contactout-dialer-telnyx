@@ -18,7 +18,7 @@ const DTMF_FREQUENCIES: { [key: string]: [number, number] } = {
 export const useDTMFTones = () => {
   const audioContextRef = useRef<AudioContext | null>(null);
   const isPlayingRef = useRef(false);
-  const [volume, setVolume] = useState(0.3); // Default volume at 30%
+  const [volume, setVolume] = useState(0.4); // Default volume at 40% for better audibility
   const [enabled, setEnabled] = useState(true); // Default enabled
 
   const initializeAudioContext = useCallback(() => {
@@ -82,34 +82,45 @@ export const useDTMFTones = () => {
 
         const frequencies = DTMF_FREQUENCIES[digit];
 
-        const duration = 0.1; // 100ms tone duration
+        // Enhanced DTMF tone with better timing and envelope
+        const duration = 0.12; // 120ms tone duration (standard DTMF duration)
         const now = audioContextRef.current.currentTime;
 
+        // Create two oscillators for the dual-tone DTMF
         const oscillator1 = audioContextRef.current.createOscillator();
         const oscillator2 = audioContextRef.current.createOscillator();
         const gainNode = audioContextRef.current.createGain();
 
+        // Set frequencies for the two tones
         oscillator1.frequency.setValueAtTime(frequencies[0], now);
         oscillator2.frequency.setValueAtTime(frequencies[1], now);
+
+        // Use sine wave for clean, traditional DTMF sound
         oscillator1.type = "sine";
         oscillator2.type = "sine";
 
+        // Create smooth envelope for natural sound
+        // Quick attack, hold, then smooth release
         gainNode.gain.setValueAtTime(0, now);
-        gainNode.gain.linearRampToValueAtTime(volume, now + 0.01);
-        gainNode.gain.linearRampToValueAtTime(volume, now + duration - 0.01);
-        gainNode.gain.linearRampToValueAtTime(0, now + duration);
+        gainNode.gain.linearRampToValueAtTime(volume, now + 0.005); // Quick attack (5ms)
+        gainNode.gain.setValueAtTime(volume, now + duration - 0.015); // Hold
+        gainNode.gain.linearRampToValueAtTime(0, now + duration); // Smooth release (15ms)
 
+        // Connect oscillators to gain node, then to destination
         oscillator1.connect(gainNode);
         oscillator2.connect(gainNode);
         gainNode.connect(audioContextRef.current.destination);
 
+        // Start and stop oscillators
         oscillator1.start(now);
         oscillator2.start(now);
         oscillator1.stop(now + duration);
         oscillator2.stop(now + duration);
 
+        // Set playing flag to prevent overlapping tones
         isPlayingRef.current = true;
 
+        // Reset playing flag after tone completes
         setTimeout(() => {
           isPlayingRef.current = false;
         }, duration * 1000);
@@ -121,20 +132,31 @@ export const useDTMFTones = () => {
     [volume, enabled]
   );
 
+  // Enhanced volume control with validation
   const updateVolume = useCallback((newVolume: number) => {
-    setVolume(newVolume);
+    // Ensure volume is within valid range (0.0 to 1.0)
+    const clampedVolume = Math.max(0.0, Math.min(1.0, newVolume));
+    setVolume(clampedVolume);
   }, []);
 
   const toggleEnabled = useCallback(() => {
     setEnabled((prev) => !prev);
   }, []);
 
+  // Cleanup function to properly dispose of audio context
   const cleanup = useCallback(() => {
     if (audioContextRef.current) {
       audioContextRef.current.close();
       audioContextRef.current = null;
     }
   }, []);
+
+  // Test function to verify DTMF tones are working
+  const testDTMFTone = useCallback(() => {
+    if (enabled) {
+      playTone("1"); // Play a test tone
+    }
+  }, [enabled, playTone]);
 
   return {
     playTone,
@@ -144,5 +166,6 @@ export const useDTMFTones = () => {
     enabled,
     toggleEnabled,
     initializeAudioContext,
+    testDTMFTone, // Add test function for debugging
   };
 };

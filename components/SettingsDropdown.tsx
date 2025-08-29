@@ -4,6 +4,7 @@ interface SettingsDropdownProps {
   onTestMicrophone: () => void;
   onDebugAudio: () => void;
   onDTMFSettings: () => void;
+  onAudioSettings: () => void;
   onSignOut: () => void;
   isAdmin?: boolean;
 }
@@ -12,6 +13,7 @@ const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
   onTestMicrophone,
   onDebugAudio,
   onDTMFSettings,
+  onAudioSettings,
   onSignOut,
   isAdmin = false,
 }) => {
@@ -83,6 +85,29 @@ const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
                   />
                 </svg>
                 Test Microphone
+              </div>
+            </button>
+
+            <button
+              onClick={() => {
+                onAudioSettings();
+                setIsOpen(false);
+              }}
+              className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors"
+            >
+              <div className="flex items-center">
+                <svg
+                  className="w-4 h-4 mr-3"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path
+                    fillRule="evenodd"
+                    d="M9.383 3.076A1 1 0 0110 4v12a1 1 0 01-1.617.793L4.5 13H2a1 1 0 01-1-1V8a1 1 0 011-1h2.5l3.883-3.793a1 1 0 011.617.793zM12.293 7.293a1 1 0 011.414 0L15 8.586l1.293-1.293a1 1 0 111.414 1.414L16.414 10l1.293 1.293a1 1 0 01-1.414 1.414L15 11.414l-1.293 1.293a1 1 0 01-1.414-1.414L13.586 10l-1.293-1.293a1 1 0 010-1.414z"
+                    clipRule="evenodd"
+                  />
+                </svg>
+                Audio Settings
               </div>
             </button>
 
