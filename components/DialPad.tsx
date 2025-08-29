@@ -1,7 +1,8 @@
-import React, { useEffect, useCallback } from "react";
+import React, { useEffect, useCallback, useState } from "react";
 import { Phone } from "lucide-react";
 import { validatePhoneNumber, getCountryFlag } from "@/lib/phoneNumberUtils";
 import { logError } from "@/lib/errorHandler";
+import { useDTMFTones } from "@/hooks/useDTMFTones";
 
 interface DialPadProps {
   phoneNumber: string;
@@ -33,80 +34,8 @@ const DialPad: React.FC<DialPadProps> = ({
   const [validationError, setValidationError] = React.useState("");
   const [isValidNumber, setIsValidNumber] = React.useState(false);
 
-  // Audio context for DTMF tones
-  const [audioContext, setAudioContext] = React.useState<AudioContext | null>(
-    null
-  );
-
-  // Initialize audio context on first user interaction
-  const initializeAudioContext = useCallback(() => {
-    if (!audioContext) {
-      const ctx = new (window.AudioContext ||
-        (window as any).webkitAudioContext)();
-      setAudioContext(ctx);
-    }
-  }, [audioContext]);
-
-  // Play DTMF tone with native-like feel
-  const playTone = useCallback(
-    (digit: string) => {
-      if (!audioContext) return;
-
-      try {
-        const oscillator = audioContext.createOscillator();
-        const gainNode = audioContext.createGain();
-
-        // Set frequency based on digit (standard DTMF frequencies)
-        const frequencies: { [key: string]: [number, number] } = {
-          "1": [697, 1209],
-          "2": [697, 1336],
-          "3": [697, 1477],
-          "4": [770, 1209],
-          "5": [770, 1336],
-          "6": [770, 1477],
-          "7": [852, 1209],
-          "8": [852, 1336],
-          "9": [852, 1477],
-          "*": [941, 1209],
-          "0": [941, 1336],
-          "#": [941, 1477],
-        };
-
-        const freq = frequencies[digit];
-        if (freq) {
-          oscillator.frequency.setValueAtTime(
-            freq[0],
-            audioContext.currentTime
-          );
-          oscillator.frequency.setValueAtTime(
-            freq[1],
-            audioContext.currentTime + 0.1
-          );
-        }
-
-        oscillator.type = "sine";
-        oscillator.connect(gainNode);
-        gainNode.connect(audioContext.destination);
-
-        // Create envelope for natural sound
-        gainNode.gain.setValueAtTime(0, audioContext.currentTime);
-        gainNode.gain.linearRampToValueAtTime(
-          0.3,
-          audioContext.currentTime + 0.01
-        );
-        gainNode.gain.exponentialRampToValueAtTime(
-          0.01,
-          audioContext.currentTime + 0.15
-        );
-
-        oscillator.start(audioContext.currentTime);
-        oscillator.stop(audioContext.currentTime + 0.15);
-      } catch (error) {
-        console.warn("DTMF tone playback failed:", error);
-      }
-    },
-    [audioContext]
-  );
+  // Use the proper DTMF tones hook
+  const { playTone, initializeAudioContext } = useDTMFTones();
 
   // Validate and format phone number
   useEffect(() => {
@@ -145,10 +74,14 @@ const DialPad: React.FC<DialPadProps> = ({
 
   const handleDigitClick = useCallback(
     (digit: string) => {
+      console.log("🔢 Digit clicked:", digit);
+
       // Initialize audio context on first user interaction
+      console.log("🎵 Initializing audio context...");
       initializeAudioContext();
 
       // Play DTMF tone
+      console.log("🔊 Playing DTMF tone for digit:", digit);
       playTone(digit);
 
       // Handle digit press
@@ -166,6 +99,29 @@ const DialPad: React.FC<DialPadProps> = ({
     !isConnected ||
     !hasMicrophoneAccess ||
     !!validationError;
+
+  // Debug logging for call button state
+  useEffect(() => {
+    console.log("🔍 Call button state check:", {
+      phoneNumber,
+      isValidNumber,
+      isConnecting,
+      isInitializing,
+      isConnected,
+      hasMicrophoneAccess,
+      validationError,
+      isCallDisabled,
+    });
+  }, [
+    phoneNumber,
+    isValidNumber,
+    isConnecting,
+    isInitializing,
+    isConnected,
+    hasMicrophoneAccess,
+    validationError,
+    isCallDisabled,
+  ]);
 
   // Get call button tooltip
   const getCallButtonTooltip = () => {
@@ -233,7 +189,19 @@ const DialPad: React.FC<DialPadProps> = ({
         <div className="relative w-full flex justify-center items-center">
           {/* Call Button - Always perfectly centered */}
           <button
-            onClick={onCall}
+            onClick={() => {
+              console.log("📞 Call button clicked!");
+              console.log("📊 Call button state:", {
+                phoneNumber,
+                isValidNumber,
+                isConnecting,
+                isInitializing,
+                isConnected,
+                hasMicrophoneAccess,
+                validationError,
+              });
+              onCall();
+            }}
             disabled={isCallDisabled}
             title={getCallButtonTooltip()}
             className={`w-20 h-20 font-semibold rounded-full transition-all duration-200 shadow-lg flex items-center justify-center transform active:scale-95 hover:shadow-xl z-10 ${

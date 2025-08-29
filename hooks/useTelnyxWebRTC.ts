@@ -481,6 +481,7 @@ export const useTelnyxWebRTC = (
     (telnyxClient: any) => {
       // Connection events
       telnyxClient.on("telnyx.ready", () => {
+        console.log("✅ Telnyx client ready - connection established");
         setIsConnected(true);
         setError(null);
         setIsInitializing(false);
@@ -491,7 +492,7 @@ export const useTelnyxWebRTC = (
       });
 
       telnyxClient.on("telnyx.error", (error: any) => {
-        console.error("Telnyx client error:", error);
+        console.error("❌ Telnyx client error:", error);
 
         // Enhanced error handling with Telnyx best practices
         const errorMessages: Record<string, string> = {
@@ -1136,8 +1137,10 @@ export const useTelnyxWebRTC = (
     setIsInitializing(true);
 
     const initializeClient = async () => {
+      console.log("🚀 Starting Telnyx WebRTC client initialization...");
       try {
         if (typeof TelnyxRTC === "undefined") {
+          console.error("❌ Telnyx WebRTC SDK not loaded");
           setError("Telnyx WebRTC SDK not loaded");
           return;
         }
@@ -1196,7 +1199,11 @@ export const useTelnyxWebRTC = (
         setClient(telnyxClient);
 
         // Connect to Telnyx
+        console.log("🔌 Attempting to connect to Telnyx...");
         await telnyxClient.connect();
+        console.log(
+          "🔌 Telnyx connect() completed, waiting for ready event..."
+        );
         setIsInitializing(false);
         initializingRef.current = false;
         // Don't set initializedRef here - let the telnyx.ready event handle it

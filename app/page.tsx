@@ -95,14 +95,6 @@ export default function Home() {
               If this takes longer than 5 seconds, please refresh the page
             </p>
           </div>
-
-          {/* Environment variable check */}
-          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
-            <p className="text-sm text-blue-700">
-              Make sure you have configured your environment variables in
-              .env.local
-            </p>
-          </div>
         </div>
       </div>
     );
