@@ -64,12 +64,12 @@ export const useDialerState = (): [DialerState, DialerActions] => {
   const [phoneNumber, setPhoneNumberState] = useState("");
 
   // UI visibility state
-  const [showAudioTest, setShowAudioTest] = useState(false);
-  const [showAudioSettings, setShowAudioSettings] = useState(false);
-  const [showDTMFSettings, setShowDTMFSettings] = useState(false);
-  const [showCallHistory, setShowCallHistory] = useState(false);
-  const [showAnalytics, setShowAnalytics] = useState(false);
-  const [showErrorPopup, setShowErrorPopup] = useState(false);
+  const [showAudioTest, setShowAudioTestState] = useState(false);
+  const [showAudioSettings, setShowAudioSettingsState] = useState(false);
+  const [showDTMFSettings, setShowDTMFSettingsState] = useState(false);
+  const [showCallHistory, setShowCallHistoryState] = useState(false);
+  const [showAnalytics, setShowAnalyticsState] = useState(false);
+  const [showErrorPopup, setShowErrorPopupState] = useState(false);
 
   // Call state
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
@@ -116,6 +116,31 @@ export const useDialerState = (): [DialerState, DialerActions] => {
     setPhoneNumberState("");
   }, []);
 
+  // UI visibility actions
+  const setShowCallHistory = useCallback((show: boolean) => {
+    setShowCallHistoryState(show);
+  }, []);
+
+  const setShowAnalytics = useCallback((show: boolean) => {
+    setShowAnalyticsState(show);
+  }, []);
+
+  const setShowAudioTest = useCallback((show: boolean) => {
+    setShowAudioTestState(show);
+  }, []);
+
+  const setShowAudioSettings = useCallback((show: boolean) => {
+    setShowAudioSettingsState(show);
+  }, []);
+
+  const setShowDTMFSettings = useCallback((show: boolean) => {
+    setShowDTMFSettingsState(show);
+  }, []);
+
+  const setShowErrorPopup = useCallback((show: boolean) => {
+    setShowErrorPopupState(show);
+  }, []);
+
   // Error actions
   const clearError = useCallback(() => {
     setErrorMessage("");
@@ -129,12 +154,12 @@ export const useDialerState = (): [DialerState, DialerActions] => {
   }, []);
 
   const resetUIState = useCallback(() => {
-    setShowAudioTest(false);
-    setShowAudioSettings(false);
-    setShowDTMFSettings(false);
-    setShowCallHistory(false);
-    setShowAnalytics(false);
-    setShowErrorPopup(false);
+    setShowAudioTestState(false);
+    setShowAudioSettingsState(false);
+    setShowDTMFSettingsState(false);
+    setShowCallHistoryState(false);
+    setShowAnalyticsState(false);
+    setShowErrorPopupState(false);
   }, []);
 
   // State object

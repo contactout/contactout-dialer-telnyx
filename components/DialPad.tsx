@@ -1,5 +1,6 @@
 import React, { useState, useEffect } from "react";
 import { useDTMFTones } from "@/hooks/useDTMFTones";
+import { Phone } from "lucide-react";
 import {
   validatePhoneNumberWithErrors,
   toE164,
@@ -131,17 +132,6 @@ const DialPad: React.FC<DialPadProps> = ({
     !hasMicrophoneAccess ||
     !!validationError;
 
-  // Get call button status text
-  const getCallButtonText = () => {
-    if (isInitializing) return "Initializing...";
-    if (!isConnected) return "Not Connected";
-    if (!hasMicrophoneAccess) return "No Microphone";
-    if (!phoneNumber) return "Enter Number";
-    if (!isValidNumber) return "Invalid Number";
-    if (isConnecting) return "Connecting...";
-    return "Call";
-  };
-
   // Get call button tooltip
   const getCallButtonTooltip = () => {
     if (isInitializing) return "Telnyx is initializing...";
@@ -166,29 +156,17 @@ const DialPad: React.FC<DialPadProps> = ({
     <div className="w-full max-w-sm mx-auto flex flex-col justify-center min-h-[600px]">
       {/* Phone Number Display */}
       <div className="mb-6 p-4 bg-gray-100 rounded-lg text-center">
-        <div className="text-xl font-mono text-gray-800 min-h-[2rem]">
+        <div className="text-xl font-mono text-gray-800 min-h-[2rem] flex items-center justify-center">
+          {countryInfo && (
+            <span className="mr-2">{getCountryFlag(countryInfo.code)}</span>
+          )}
           {formattedNumber || "Enter number"}
         </div>
-
-        {/* Country Flag and Info */}
-        {countryInfo && (
-          <div className="mt-2 flex items-center justify-center space-x-2 text-sm text-gray-600">
-            <span>{getCountryFlag(countryInfo.code)}</span>
-            <span>{countryInfo.name}</span>
-          </div>
-        )}
 
         {/* Validation Error */}
         {validationError && (
           <div className="mt-2 text-sm text-red-600 font-medium">
             {validationError}
-          </div>
-        )}
-
-        {/* E.164 Format Display */}
-        {isValidNumber && phoneNumber && (
-          <div className="mt-2 text-xs text-gray-500 font-mono">
-            E.164: {toE164(phoneNumber)}
           </div>
         )}
       </div>
@@ -233,7 +211,7 @@ const DialPad: React.FC<DialPadProps> = ({
                 : "bg-green-500 hover:bg-green-600 text-white"
             }`}
           >
-            {getCallButtonText()}
+            <Phone className="w-5 h-5" />
           </button>
           {phoneNumber && (
             <button
@@ -252,26 +230,6 @@ const DialPad: React.FC<DialPadProps> = ({
           <div className="inline-flex items-center px-3 py-1 rounded-full text-sm bg-green-100 text-green-800">
             <div className="w-2 h-2 bg-green-500 rounded-full mr-2 animate-pulse"></div>
             Call Active
-          </div>
-        </div>
-      )}
-
-      {/* Validation Status */}
-      {phoneNumber && !isCallActive && (
-        <div className="mt-4 text-center">
-          <div
-            className={`inline-flex items-center px-3 py-1 rounded-full text-sm ${
-              isValidNumber
-                ? "bg-green-100 text-green-800"
-                : "bg-red-100 text-red-800"
-            }`}
-          >
-            <div
-              className={`w-2 h-2 rounded-full mr-2 ${
-                isValidNumber ? "bg-green-500" : "bg-red-500"
-              }`}
-            ></div>
-            {isValidNumber ? "Valid Number" : "Invalid Number"}
           </div>
         </div>
       )}

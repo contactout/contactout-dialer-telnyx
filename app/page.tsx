@@ -5,6 +5,7 @@ import { useAuth } from "@/contexts/AuthContext";
 import { useDeviceDetection } from "@/hooks/useDeviceDetection";
 import { useCallHistory } from "@/hooks/useCallHistory";
 import { useTelnyxWebRTC } from "@/hooks/useTelnyxWebRTC";
+import { Phone, History } from "lucide-react";
 import {
   useDialerState,
   DialerState,
@@ -25,6 +26,7 @@ import DTMFSettings from "@/components/DTMFSettings";
 import ErrorPopup from "@/components/ErrorPopup";
 import SettingsDropdown from "@/components/SettingsDropdown";
 import CallAnalyticsDashboard from "@/components/CallAnalyticsDashboard";
+import LoginScreen from "@/components/LoginScreen";
 
 export default function Home() {
   // Core hooks
@@ -93,6 +95,14 @@ export default function Home() {
               If this takes longer than 5 seconds, please refresh the page
             </p>
           </div>
+
+          {/* Environment variable check */}
+          <div className="mt-4 p-3 bg-blue-50 border border-blue-200 rounded-lg">
+            <p className="text-sm text-blue-700">
+              Make sure you have configured your environment variables in
+              .env.local
+            </p>
+          </div>
         </div>
       </div>
     );
@@ -100,16 +110,7 @@ export default function Home() {
 
   // Show login screen if user is not authenticated
   if (!user) {
-    return (
-      <div className="min-h-screen bg-gray-50 flex items-center justify-center">
-        <div className="text-center">
-          <h1 className="text-2xl font-bold text-gray-900 mb-4">
-            Authentication Required
-          </h1>
-          <p className="text-gray-600">Please log in to access the dialer.</p>
-        </div>
-      </div>
-    );
+    return <LoginScreen />;
   }
 
   // Show calling screen when connecting OR when call is active
@@ -123,27 +124,6 @@ export default function Home() {
           </div>
 
           <div className="flex items-center space-x-3">
-            {/* Analytics Button */}
-            <button
-              onClick={() => actions.setShowAnalytics(true)}
-              className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2 text-sm"
-            >
-              <svg
-                className="h-4 w-4"
-                fill="none"
-                viewBox="0 0 24 24"
-                stroke="currentColor"
-              >
-                <path
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  strokeWidth={2}
-                  d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-                />
-              </svg>
-              <span>Analytics</span>
-            </button>
-
             {/* Connection Status Icon */}
             <div
               className="flex items-center space-x-1"
@@ -275,27 +255,6 @@ export default function Home() {
         </div>
 
         <div className="flex items-center space-x-3">
-          {/* Analytics Button */}
-          <button
-            onClick={() => actions.setShowAnalytics(true)}
-            className="px-3 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition-colors flex items-center space-x-2 text-sm"
-          >
-            <svg
-              className="h-4 w-4"
-              fill="none"
-              viewBox="0 0 24 24"
-              stroke="currentColor"
-            >
-              <path
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeWidth={2}
-                d="M9 19v-6a2 2 0 00-2-2H5a2 2 0 00-2 2v6a2 2 0 002 2h2a2 2 0 002-2zm0 0V9a2 2 0 012-2h2a2 2 0 012 2v10m-6 0a2 2 0 002 2h2a2 2 0 002-2m0 0V5a2 2 0 012-2h2a2 2 0 012 2v14a2 2 0 01-2 2h-2a2 2 0 01-2-2z"
-              />
-            </svg>
-            <span>Analytics</span>
-          </button>
-
           {/* Connection Status Icon */}
           <div
             className="flex items-center space-x-1"
@@ -369,6 +328,36 @@ export default function Home() {
         </div>
       </div>
 
+      {/* Tab Navigation - Better Design */}
+      <div className="mb-6">
+        <div className="bg-gray-100 rounded-lg p-1">
+          <div className="flex space-x-1">
+            <button
+              onClick={() => actions.setShowCallHistory(false)}
+              className={`flex-1 py-3 px-4 rounded-md font-medium text-sm transition-all duration-200 ${
+                !state.showCallHistory
+                  ? "bg-white text-blue-600 shadow-sm"
+                  : "text-gray-600 hover:text-gray-800 hover:bg-gray-50"
+              }`}
+            >
+              <Phone className="w-4 h-4 inline mr-2" />
+              Dial Pad
+            </button>
+            <button
+              onClick={() => actions.setShowCallHistory(true)}
+              className={`flex-1 py-3 px-4 rounded-md font-medium text-sm transition-all duration-200 ${
+                state.showCallHistory
+                  ? "bg-white text-blue-600 shadow-sm"
+                  : "text-gray-600 hover:text-gray-800 hover:bg-gray-50"
+              }`}
+            >
+              <History className="w-4 h-4 inline mr-2" />
+              Call History
+            </button>
+          </div>
+        </div>
+      </div>
+
       {/* Main Content */}
       <div className="flex-1 flex flex-col justify-center">
         {state.showCallHistory ? (
@@ -380,29 +369,19 @@ export default function Home() {
             error={callHistoryError}
           />
         ) : (
-          <>
-            <DialPad
-              phoneNumber={state.phoneNumber}
-              onDigitPress={logic.handleDigitPress}
-              onBackspace={logic.handleBackspace}
-              onCall={logic.handleCall}
-              onHangup={logic.handleHangup}
-              onClear={logic.handleClearNumber}
-              isCallActive={telnyxActions.isCallActive}
-              isConnecting={telnyxActions.isConnecting}
-              isInitializing={telnyxActions.isInitializing}
-              isConnected={telnyxActions.isConnected}
-              hasMicrophoneAccess={telnyxActions.hasMicrophoneAccess}
-            />
-
-            {/* Instructions */}
-            <div className="mt-8 text-center text-sm text-gray-600">
-              <p>Enter a phone number and click Call to start dialing</p>
-              <p className="mt-1">
-                Use the call history to redial previous numbers
-              </p>
-            </div>
-          </>
+          <DialPad
+            phoneNumber={state.phoneNumber}
+            onDigitPress={logic.handleDigitPress}
+            onBackspace={logic.handleBackspace}
+            onCall={logic.handleCall}
+            onHangup={logic.handleHangup}
+            onClear={logic.handleClearNumber}
+            isCallActive={telnyxActions.isCallActive}
+            isConnecting={telnyxActions.isConnecting}
+            isInitializing={telnyxActions.isInitializing}
+            isConnected={telnyxActions.isConnected}
+            hasMicrophoneAccess={telnyxActions.hasMicrophoneAccess}
+          />
         )}
       </div>
 

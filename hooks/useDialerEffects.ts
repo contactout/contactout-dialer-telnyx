@@ -24,13 +24,6 @@ export const useDialerEffects = (
       telnyxActions.error &&
       (telnyxActions.isConnecting || telnyxActions.isCallActive)
     ) {
-      console.log("🚨 ERROR DETECTED in main page:", {
-        error: telnyxActions.error,
-        isConnecting: telnyxActions.isConnecting,
-        isCallActive: telnyxActions.isCallActive,
-        callState: telnyxActions.callState,
-      });
-
       // Check if this is a call failure error that should show popup
       const isCallFailure =
         telnyxActions.error.includes("invalid") ||
@@ -40,24 +33,17 @@ export const useDialerEffects = (
         telnyxActions.error.includes("no-answer") ||
         telnyxActions.error.includes("timeout");
 
-      console.log("🚨 Error type check:", {
-        isCallFailure,
-        error: telnyxActions.error,
-      });
-
       if (isCallFailure) {
-        // For call failures, show error popup instead of auto-redirecting
-        console.log("🚨 Setting error popup for call failure");
+        // For call failures, immediately redirect to dialpad and show error popup
         actions.setErrorMessage(telnyxActions.error);
         actions.setShowErrorPopup(true);
-        // Don't auto-redirect - let user control when to return to dialpad
-        actions.setAutoRedirectCountdown(null);
+        // Force immediate return to dialpad
+        telnyxActions.forceResetCallState();
       } else {
-        // For other errors, just reset after 2 seconds
-        console.log("🚨 Non-call failure error, will auto-reset");
+        // For other errors, just reset after 1.5 seconds
         const resetTimeout = setTimeout(() => {
           telnyxActions.forceResetCallState();
-        }, 2000);
+        }, 1500);
 
         return () => clearTimeout(resetTimeout);
       }
@@ -67,7 +53,6 @@ export const useDialerEffects = (
     telnyxActions.isConnecting,
     telnyxActions.isCallActive,
     telnyxActions.forceResetCallState,
-    telnyxActions.callState,
     actions,
   ]);
 
@@ -76,13 +61,32 @@ export const useDialerEffects = (
     if (telnyxActions.isConnecting && !telnyxActions.isCallActive) {
       const safetyTimeout = setTimeout(() => {
         telnyxActions.forceResetCallState();
-      }, 10000); // 10 seconds safety timeout
+      }, 5000); // 5 seconds safety timeout (reduced from 10s)
 
       return () => clearTimeout(safetyTimeout);
     }
   }, [
     telnyxActions.isConnecting,
     telnyxActions.isCallActive,
+    telnyxActions.forceResetCallState,
+  ]);
+
+  // Early failure detection for calls stuck in "trying" state
+  useEffect(() => {
+    if (telnyxActions.callState === "trying" && !telnyxActions.isCallActive) {
+      const earlyFailureTimeout = setTimeout(() => {
+        // If call has been in "trying" state for more than 2 seconds, force failure
+        actions.setErrorMessage("Call failed - Number not reachable");
+        actions.setShowErrorPopup(true);
+        telnyxActions.forceResetCallState();
+      }, 2000); // 2 seconds for early failure detection
+
+      return () => clearTimeout(earlyFailureTimeout);
+    }
+  }, [
+    telnyxActions.callState,
+    telnyxActions.isCallActive,
+    actions,
     telnyxActions.forceResetCallState,
   ]);
 

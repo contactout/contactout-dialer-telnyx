@@ -503,13 +503,17 @@ export const useTelnyxWebRTC = (
           errorMessages[error.code] ||
           `Telnyx error: ${error.message || "Unknown error"}`;
 
-        setError(errorMessage);
+        // Only set error if it's different from current error to prevent loops
+        setError((prevError) => {
+          if (prevError !== errorMessage) {
+            return errorMessage;
+          }
+          return prevError;
+        });
+
         setIsConnected(false);
         setIsInitializing(false);
         initializingRef.current = false;
-        // Don't set initializedRef to true on error - let it retry
-        // initializedRef.current = true;
-        // Don't set configRef.current on error - let it retry with fresh config
 
         if (error.code === "AUTH_FAILED" || error.code === "INVALID_CONFIG") {
           transitionCallState("idle");
@@ -563,11 +567,18 @@ export const useTelnyxWebRTC = (
             (call.state === "hangup" || call.state === "destroy") &&
             (callState === "connecting" || callState === "trying")
           ) {
-            if (callDuration < 2) {
-              console.log("🚨 IMMEDIATE FAILURE DETECTED via primary handler");
-              setError(
-                "Call failed - Invalid phone number or number not reachable"
+            if (callDuration < 1.5) {
+              console.log(
+                "🚨 IMMEDIATE FAILURE DETECTED - Invalid/unreachable number"
               );
+              // Set error and immediately transition to idle
+              setError((prevError) => {
+                const failureMessage =
+                  "Call failed - Invalid phone number or number not reachable";
+                return prevError !== failureMessage
+                  ? failureMessage
+                  : prevError;
+              });
               transitionCallState("idle", call);
 
               // Log call to Supabase
@@ -1317,11 +1328,33 @@ export const useTelnyxWebRTC = (
   );
 
   const hangupCall = useCallback(() => {
+    // Check if call is already in a terminal state
+    if (
+      currentCall &&
+      currentCall.state &&
+      (currentCall.state === "hangup" ||
+        currentCall.state === "destroy" ||
+        currentCall.state === "idle")
+    ) {
+      console.log("Call already in terminal state - proceeding with cleanup");
+      transitionCallState("idle");
+      return;
+    }
+
     if (currentCall && typeof currentCall.hangup === "function") {
       try {
         currentCall.hangup();
-      } catch (error) {
-        console.error("Error hanging up call:", error);
+      } catch (error: any) {
+        // Filter out common hangup errors that don't indicate real problems
+        if (
+          error?.code === -32002 &&
+          error?.message === "CALL DOES NOT EXIST"
+        ) {
+          // This is expected when the call has already ended
+          console.log("Call already ended - proceeding with cleanup");
+        } else {
+          console.error("Error hanging up call:", error);
+        }
       }
     }
     transitionCallState("idle");
@@ -1351,7 +1384,19 @@ export const useTelnyxWebRTC = (
   const retryCall = useCallback(
     async (phoneNumber: string, maxRetries: number = 3) => {
       if (currentCall && typeof currentCall.hangup === "function") {
-        currentCall.hangup();
+        try {
+          currentCall.hangup();
+        } catch (error: any) {
+          // Filter out common hangup errors that don't indicate real problems
+          if (
+            error?.code === -32002 &&
+            error?.message === "CALL DOES NOT EXIST"
+          ) {
+            console.log("Call already ended during retry - proceeding");
+          } else {
+            console.error("Error hanging up call during retry:", error);
+          }
+        }
       }
 
       transitionCallState("idle");

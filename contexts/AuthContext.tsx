@@ -184,9 +184,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       supabaseUrl.includes("your_") ||
       supabaseKey.includes("your_")
     ) {
-      // Skip auth if credentials are not configured
-      console.warn(
-        "Supabase credentials not configured. Skipping authentication."
+      // Show clear error message when credentials are missing
+      console.error(
+        "Supabase credentials not configured. Authentication will not work."
+      );
+      setAuthError(
+        "Authentication is not configured. Please check your environment variables (NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_ANON_KEY)."
       );
       setLoading(false);
       return;
@@ -229,6 +232,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         })
         .catch((error) => {
           console.error("Supabase auth error:", error);
+          setAuthError(`Authentication error: ${error.message}`);
           setLoading(false);
         });
     }
