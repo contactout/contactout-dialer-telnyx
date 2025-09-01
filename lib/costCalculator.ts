@@ -322,54 +322,128 @@ export class TelnyxCostCalculator {
   }> {
     try {
       const apiKey = process.env.NEXT_PUBLIC_TELNYX_API_KEY;
-      if (!apiKey || apiKey.trim() === "" || apiKey.includes("your_")) {
+
+      // Enhanced debug logging with more environment context
+      const envDebug = {
+        hasApiKey: !!apiKey,
+        apiKeyLength: apiKey?.length || 0,
+        apiKeyStart: apiKey?.substring(0, 10) || "undefined",
+        nodeEnv: process.env.NODE_ENV,
+        allTelnyxVars: Object.keys(process.env).filter((key) =>
+          key.includes("TELNYX")
+        ),
+        isClient: typeof window !== "undefined",
+        processType: typeof process,
+        envType: typeof process.env,
+        buildTime: new Date().toISOString(),
+      };
+
+      console.log("Telnyx API Test - Enhanced Environment Check:", envDebug);
+
+      // Check for common environment variable issues
+      if (!apiKey) {
+        const errorDetails = {
+          reason: "Environment variable not found",
+          expected: "NEXT_PUBLIC_TELNYX_API_KEY",
+          available: Object.keys(process.env).filter((key) =>
+            key.startsWith("NEXT_PUBLIC_")
+          ),
+          environment: process.env.NODE_ENV,
+          isClient: typeof window !== "undefined",
+        };
+
+        console.error("Telnyx API key not found:", errorDetails);
         return {
           isConnected: false,
           message: "Telnyx API key not configured",
+          details: errorDetails,
         };
       }
 
-      // Test with a common country code (US)
-      const testResponse = await fetch(
-        "https://api.telnyx.com/v2/pricing/voice/US",
-        {
-          method: "GET",
-          headers: {
-            Authorization: `Bearer ${apiKey}`,
-            Accept: "application/json",
-          },
-          signal: AbortSignal.timeout(5000), // 5 second timeout for test
-        }
-      );
-
-      if (testResponse.ok) {
-        return {
-          isConnected: true,
-          message: "Telnyx API connection successful",
-          details: {
-            status: testResponse.status,
-            statusText: testResponse.statusText,
-          },
-        };
-      } else {
-        const errorText = await testResponse.text();
+      if (apiKey.trim() === "") {
+        console.warn("Telnyx API key is empty string");
         return {
           isConnected: false,
-          message: `Telnyx API test failed: ${testResponse.status} ${testResponse.statusText}`,
+          message: "Telnyx API key is empty",
+          details: {
+            reason: "empty_string",
+            environment: process.env.NODE_ENV,
+          },
+        };
+      }
+
+      if (apiKey.includes("your_")) {
+        console.warn("Telnyx API key contains placeholder text");
+        return {
+          isConnected: false,
+          message: "Telnyx API key contains placeholder text",
+          details: {
+            reason: "placeholder_detected",
+            apiKeyPrefix: apiKey.substring(0, 20),
+          },
+        };
+      }
+
+      console.log(
+        "Attempting Telnyx API connection via server-side route with key:",
+        apiKey.substring(0, 15) + "..."
+      );
+
+      // Use server-side API route to avoid CORS issues
+      const apiTestUrl = "/api/telnyx-test";
+      console.log("Making request to server-side API route:", apiTestUrl);
+
+      const testResponse = await fetch(apiTestUrl, {
+        method: "GET",
+        headers: {
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(15000), // 15 second timeout for server-side processing
+      });
+
+      if (!testResponse.ok) {
+        const errorText = await testResponse.text();
+        console.error("Server-side API route failed:", {
+          status: testResponse.status,
+          statusText: testResponse.statusText,
+          error: errorText,
+        });
+
+        return {
+          isConnected: false,
+          message: `Server-side API route failed: ${testResponse.status} ${testResponse.statusText}`,
           details: {
             status: testResponse.status,
             statusText: testResponse.statusText,
             error: errorText,
+            route: apiTestUrl,
+            environment: process.env.NODE_ENV,
           },
         };
       }
+
+      const responseData = await testResponse.json();
+      console.log("Server-side API route response:", responseData);
+
+      return responseData;
     } catch (error) {
+      const errorDetails = {
+        error: error instanceof Error ? error.message : "Unknown error",
+        stack: error instanceof Error ? error.stack : undefined,
+        type: error instanceof Error ? error.constructor.name : typeof error,
+        environment: process.env.NODE_ENV,
+        timestamp: new Date().toISOString(),
+        method: "server_side_api_route",
+      };
+
+      console.error("Telnyx API connection test error:", errorDetails);
+
       return {
         isConnected: false,
         message: `Telnyx API connection test failed: ${
           error instanceof Error ? error.message : "Unknown error"
         }`,
-        details: { error },
+        details: errorDetails,
       };
     }
   }
@@ -388,11 +462,10 @@ export class TelnyxCostCalculator {
         );
       }
 
-      // Try to fetch available countries from Telnyx API
-      const response = await fetch("https://api.telnyx.com/v2/pricing/voice", {
+      // Use server-side API route to avoid CORS issues
+      const response = await fetch("/api/telnyx-countries", {
         method: "GET",
         headers: {
-          Authorization: `Bearer ${apiKey}`,
           Accept: "application/json",
         },
         signal: AbortSignal.timeout(10000),
@@ -400,26 +473,26 @@ export class TelnyxCostCalculator {
 
       if (response.ok) {
         const data = await response.json();
-        if (data.data && Array.isArray(data.data)) {
-          // Extract unique country codes from the response
-          const countryCodes: string[] = [];
-          for (const item of data.data) {
-            if (item.country_code && typeof item.country_code === "string") {
-              countryCodes.push(item.country_code);
-            }
-          }
-          const uniqueCountries = Array.from(new Set(countryCodes));
-          return uniqueCountries;
+        if (data.countries && Array.isArray(data.countries)) {
+          console.log(
+            "Countries fetched via server-side route:",
+            data.source,
+            data.countries.length
+          );
+          return data.countries;
         }
       }
 
       // Fallback to hardcoded countries if API call fails
+      console.warn(
+        "Failed to fetch available countries via server-side route, using fallback"
+      );
       return Object.keys(this.REGIONAL_SIP_COSTS).filter(
         (code) => code !== "DEFAULT"
       );
     } catch (error) {
       console.warn(
-        "Failed to fetch available countries from Telnyx API, using fallback:",
+        "Failed to fetch available countries via server-side route, using fallback:",
         error
       );
       return Object.keys(this.REGIONAL_SIP_COSTS).filter(

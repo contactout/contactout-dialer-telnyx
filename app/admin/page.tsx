@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react";
 import { useAuth } from "@/contexts/AuthContext";
 import { DatabaseService, UserStats } from "@/lib/database";
-import { TelnyxCostCalculator } from "@/lib/costCalculator";
 import { supabase } from "@/lib/supabase";
 
 interface CallStats {
@@ -28,8 +27,6 @@ export default function AdminPage() {
   const [userCallHistory, setUserCallHistory] = useState<any[]>([]);
   const [isLoadingCallHistory, setIsLoadingCallHistory] = useState(false);
   const [showCostInfo, setShowCostInfo] = useState(false);
-  const [telnyxApiStatus, setTelnyxApiStatus] = useState<any>(null);
-  const [isTestingApi, setIsTestingApi] = useState(false);
 
   useEffect(() => {
     const checkAdminAndFetch = async () => {
@@ -94,42 +91,6 @@ export default function AdminPage() {
 
   const refreshData = () => {
     fetchAdminData();
-  };
-
-  const testTelnyxApi = async () => {
-    try {
-      setIsTestingApi(true);
-      setTelnyxApiStatus(null);
-
-      const result = await TelnyxCostCalculator.testTelnyxApiConnection();
-      setTelnyxApiStatus(result);
-
-      if (result.isConnected) {
-        // Also test getting available countries
-        try {
-          const countries = await TelnyxCostCalculator.getAvailableCountries();
-          const cacheStats = TelnyxCostCalculator.getCacheStats();
-
-          setTelnyxApiStatus({
-            ...result,
-            availableCountries: countries,
-            cacheStats,
-          });
-        } catch (countryError) {
-          console.warn("Failed to get available countries:", countryError);
-        }
-      }
-    } catch (error) {
-      setTelnyxApiStatus({
-        isConnected: false,
-        message: `API test failed: ${
-          error instanceof Error ? error.message : "Unknown error"
-        }`,
-        details: { error },
-      });
-    } finally {
-      setIsTestingApi(false);
-    }
   };
 
   const fetchDebugInfo = async () => {
@@ -252,141 +213,6 @@ export default function AdminPage() {
                 <span>Back to Dialer</span>
               </button>
             </div>
-          </div>
-        </div>
-      </div>
-
-      {/* Telnyx API Test Section */}
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="bg-white rounded-lg shadow p-6">
-          <div className="flex justify-between items-center mb-4">
-            <h2 className="text-lg font-medium text-gray-900">
-              Telnyx API Integration Test
-            </h2>
-            <button
-              onClick={testTelnyxApi}
-              disabled={isTestingApi}
-              className="px-4 py-2 bg-green-600 text-white rounded-lg hover:bg-green-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors"
-            >
-              {isTestingApi ? "Testing..." : "Test API Connection"}
-            </button>
-          </div>
-
-          {telnyxApiStatus && (
-            <div className="space-y-4">
-              <div
-                className={`p-4 rounded-lg ${
-                  telnyxApiStatus.isConnected
-                    ? "bg-green-50 border border-green-200"
-                    : "bg-red-50 border border-red-200"
-                }`}
-              >
-                <div className="flex items-center space-x-2">
-                  <div
-                    className={`w-3 h-3 rounded-full ${
-                      telnyxApiStatus.isConnected
-                        ? "bg-green-500"
-                        : "bg-red-500"
-                    }`}
-                  ></div>
-                  <span
-                    className={`font-medium ${
-                      telnyxApiStatus.isConnected
-                        ? "text-green-800"
-                        : "text-red-800"
-                    }`}
-                  >
-                    {telnyxApiStatus.message}
-                  </span>
-                </div>
-
-                {telnyxApiStatus.details && (
-                  <div className="mt-2 text-sm text-gray-600">
-                    <pre className="bg-gray-100 p-2 rounded text-xs overflow-x-auto">
-                      {JSON.stringify(telnyxApiStatus.details, null, 2)}
-                    </pre>
-                  </div>
-                )}
-              </div>
-
-              {telnyxApiStatus.isConnected &&
-                telnyxApiStatus.availableCountries && (
-                  <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
-                    <h3 className="font-medium text-blue-800 mb-2">
-                      Available Countries
-                    </h3>
-                    <div className="text-sm text-blue-700">
-                      {telnyxApiStatus.availableCountries.length} countries
-                      available for pricing
-                    </div>
-                    <div className="mt-2 flex flex-wrap gap-1">
-                      {telnyxApiStatus.availableCountries
-                        .slice(0, 20)
-                        .map((country: string) => (
-                          <span
-                            key={country}
-                            className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded"
-                          >
-                            {country}
-                          </span>
-                        ))}
-                      {telnyxApiStatus.availableCountries.length > 20 && (
-                        <span className="px-2 py-1 bg-blue-100 text-blue-800 text-xs rounded">
-                          +{telnyxApiStatus.availableCountries.length - 20} more
-                        </span>
-                      )}
-                    </div>
-                  </div>
-                )}
-
-              {telnyxApiStatus.isConnected && telnyxApiStatus.cacheStats && (
-                <div className="bg-purple-50 border border-purple-200 rounded-lg p-4">
-                  <h3 className="font-medium text-purple-800 mb-2">
-                    Pricing Cache Statistics
-                  </h3>
-                  <div className="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
-                    <div>
-                      <span className="text-purple-600">Total Entries:</span>
-                      <div className="font-medium">
-                        {telnyxApiStatus.cacheStats.totalEntries}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-purple-600">Active Entries:</span>
-                      <div className="font-medium">
-                        {telnyxApiStatus.cacheStats.activeEntries}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-purple-600">Expired Entries:</span>
-                      <div className="font-medium">
-                        {telnyxApiStatus.cacheStats.expiredEntries}
-                      </div>
-                    </div>
-                    <div>
-                      <span className="text-purple-600">Cache Hit Rate:</span>
-                      <div className="font-medium">
-                        {telnyxApiStatus.cacheStats.cacheHitRate}%
-                      </div>
-                    </div>
-                  </div>
-                </div>
-              )}
-            </div>
-          )}
-
-          <div className="mt-4 text-sm text-gray-600">
-            <p>
-              This section tests the Telnyx API integration for real-time
-              pricing data.
-            </p>
-            <p>
-              Make sure your{" "}
-              <code className="bg-gray-100 px-1 rounded">
-                NEXT_PUBLIC_TELNYX_API_KEY
-              </code>{" "}
-              is configured in your environment variables.
-            </p>
           </div>
         </div>
       </div>
@@ -703,6 +529,7 @@ export default function AdminPage() {
                       Total Cost
                     </p>
                     <p className="text-lg font-semibold text-green-600">
+                      $
                       {userStats
                         .reduce(
                           (total, user) => total + (user.total_cost || 0),
@@ -917,9 +744,7 @@ export default function AdminPage() {
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-900">
                         <span className="font-medium text-green-600">
-                          {TelnyxCostCalculator.formatCost(
-                            user.total_cost || 0
-                          )}
+                          ${(user.total_cost || 0).toFixed(4)}
                         </span>
                       </td>
                       <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">
@@ -1111,9 +936,7 @@ export default function AdminPage() {
                                         Cost:
                                       </span>
                                       <span className="ml-2 text-gray-900 font-medium text-green-600">
-                                        {TelnyxCostCalculator.formatCost(
-                                          call.total_cost
-                                        )}
+                                        ${call.total_cost.toFixed(4)}
                                       </span>
                                       {call.pricing_source && (
                                         <span
