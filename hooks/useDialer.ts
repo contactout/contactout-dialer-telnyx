@@ -12,7 +12,6 @@ export interface DialerState {
   showAudioSettings: boolean;
   showDTMFSettings: boolean;
   showCallHistory: boolean;
-  showAnalytics: boolean;
   showErrorPopup: boolean;
 
   // Call state
@@ -42,7 +41,6 @@ export interface DialerActions {
   setShowAudioSettings: (show: boolean) => void;
   setShowDTMFSettings: (show: boolean) => void;
   setShowCallHistory: (show: boolean) => void;
-  setShowAnalytics: (show: boolean) => void;
   setShowErrorPopup: (show: boolean) => void;
 
   // Call actions
@@ -106,7 +104,6 @@ export const useDialer = (telnyxActions: {
   const [showAudioSettings, setShowAudioSettingsState] = useState(false);
   const [showDTMFSettings, setShowDTMFSettingsState] = useState(false);
   const [showCallHistory, setShowCallHistoryState] = useState(false);
-  const [showAnalytics, setShowAnalyticsState] = useState(false);
   const [showErrorPopup, setShowErrorPopupState] = useState(false);
 
   // Call state
@@ -202,10 +199,6 @@ export const useDialer = (telnyxActions: {
     setShowCallHistoryState(show);
   }, []);
 
-  const setShowAnalytics = useCallback((show: boolean) => {
-    setShowAnalyticsState(show);
-  }, []);
-
   const setShowErrorPopup = useCallback((show: boolean) => {
     setShowErrorPopupState(show);
   }, []);
@@ -244,7 +237,6 @@ export const useDialer = (telnyxActions: {
     setShowAudioSettings(false);
     setShowDTMFSettings(false);
     setShowCallHistory(false);
-    setShowAnalytics(false);
     setShowErrorPopup(false);
   }, []);
 
@@ -387,7 +379,6 @@ export const useDialer = (telnyxActions: {
     showAudioSettings,
     showDTMFSettings,
     showCallHistory,
-    showAnalytics,
     showErrorPopup,
     callStartTime,
     callDuration,
@@ -404,7 +395,6 @@ export const useDialer = (telnyxActions: {
     setShowAudioSettings,
     setShowDTMFSettings,
     setShowCallHistory,
-    setShowAnalytics,
     setShowErrorPopup,
     setCallStartTime: setCallStartTimeAction,
     setCallDuration: setCallDurationAction,

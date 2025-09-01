@@ -277,7 +277,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             );
           } catch (error) {
             console.error("Failed to create/update user record:", error);
-            // Don't block login if user creation fails
+            // Don't block login if user creation fails, but log the issue
+            // This could indicate a database trigger failure or RLS policy issue
+            console.warn(
+              "User creation failed - this may indicate a database configuration issue"
+            );
+
+            // Try to get user details to see if they exist
+            try {
+              const userDetails = await DatabaseService.getUserDetails(
+                session.user.id
+              );
+              if (!userDetails) {
+                console.error(
+                  "User does not exist in database - database trigger may have failed"
+                );
+                // You might want to show a warning to the user here
+              }
+            } catch (detailError) {
+              console.error("Could not verify user existence:", detailError);
+            }
           }
 
           // Check and cache admin status once

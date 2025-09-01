@@ -38,6 +38,9 @@ export class DatabaseService {
     full_name?: string | null;
   }): Promise<void> {
     try {
+      console.log(
+        `Attempting to create/update user: ${userData.email} (${userData.id})`
+      );
       const now = new Date().toISOString();
 
       // First, check if user already exists and has a role set
@@ -49,15 +52,27 @@ export class DatabaseService {
         .eq("id", userData.id)
         .single();
 
+      if (fetchError && fetchError.code !== "PGRST116") {
+        // PGRST116 = no rows returned (user doesn't exist)
+        console.error("Error fetching existing user:", fetchError);
+        throw fetchError;
+      }
+
       // Determine the role to use
       let role = "user"; // default role
 
       if (existingUser && existingUser.role) {
         // User exists and has a role - preserve it
         role = existingUser.role;
-      } else if (userData.email?.includes("admin")) {
+        console.log(
+          `Preserving existing role for user ${userData.id}: ${role}`
+        );
+      } else if (userData.email?.toLowerCase().includes("admin")) {
         // New user with admin email - set as admin
         role = "admin";
+        console.log(
+          `Setting admin role for user ${userData.id} based on email`
+        );
       }
 
       // Check if we actually need to update anything
@@ -68,13 +83,24 @@ export class DatabaseService {
         existingUser.full_name === userData.full_name
       ) {
         // No changes needed, just update last_active
+        console.log(`User ${userData.id} exists, updating last_active only`);
         const { error: updateError } = await supabase
           .from("users")
           .update({ last_active: now })
           .eq("id", userData.id);
 
-        if (updateError) throw updateError;
+        if (updateError) {
+          console.error("Error updating last_active:", updateError);
+          throw updateError;
+        }
         return; // Exit early, no need for full upsert
+      }
+
+      // If user doesn't exist, this might be a case where the database trigger failed
+      if (!existingUser) {
+        console.log(
+          `User ${userData.id} not found in database, creating new record`
+        );
       }
 
       // Try to insert new user, if conflict then update
@@ -96,9 +122,23 @@ export class DatabaseService {
         }
       );
 
-      if (error) throw error;
+      if (error) {
+        console.error("Error in upsert operation:", error);
+        throw error;
+      }
+
+      console.log(
+        `Successfully created/updated user record for ${userData.email}`
+      );
     } catch (error) {
       console.error("Error creating/updating user:", error);
+      // Log additional context for debugging
+      console.error("User data that failed:", {
+        id: userData.id,
+        email: userData.email,
+        full_name: userData.full_name,
+        timestamp: new Date().toISOString(),
+      });
       throw error;
     }
   }

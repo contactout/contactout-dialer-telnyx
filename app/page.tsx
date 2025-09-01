@@ -20,7 +20,7 @@ import DTMFSettings from "@/components/DTMFSettings";
 import ErrorPopup from "@/components/ErrorPopup";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import SettingsDropdown from "@/components/SettingsDropdown";
-import CallAnalyticsDashboard from "@/components/CallAnalyticsDashboard";
+
 import LoginScreen from "@/components/LoginScreen";
 
 export default function Home() {
@@ -465,14 +465,6 @@ export default function Home() {
           error={state.errorMessage}
           isVisible={state.showErrorPopup}
           onClose={logic.handleErrorPopupClose}
-        />
-
-        {/* Analytics Dashboard */}
-        <CallAnalyticsDashboard
-          callHistory={callHistory}
-          userId={user?.id}
-          isVisible={state.showAnalytics}
-          onClose={() => actions.setShowAnalytics(false)}
         />
       </main>
     </ErrorBoundary>

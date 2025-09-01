@@ -66,6 +66,7 @@ export class TelnyxCostCalculator {
       const expiry = this.cacheExpiry.get(countryCode);
 
       if (cached && expiry && Date.now() < expiry) {
+        console.log(`Using cached pricing for ${countryCode}`);
         return cached;
       }
 
@@ -308,5 +309,188 @@ export class TelnyxCostCalculator {
       currency: total.currency,
       pricingSource: total.pricingSource,
     };
+  }
+
+  /**
+   * Test Telnyx API connectivity and authentication
+   * @returns Promise<boolean> - true if API is accessible
+   */
+  static async testTelnyxApiConnection(): Promise<{
+    isConnected: boolean;
+    message: string;
+    details?: any;
+  }> {
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_TELNYX_API_KEY;
+      if (!apiKey || apiKey.trim() === "" || apiKey.includes("your_")) {
+        return {
+          isConnected: false,
+          message: "Telnyx API key not configured",
+        };
+      }
+
+      // Test with a common country code (US)
+      const testResponse = await fetch(
+        "https://api.telnyx.com/v2/pricing/voice/US",
+        {
+          method: "GET",
+          headers: {
+            Authorization: `Bearer ${apiKey}`,
+            Accept: "application/json",
+          },
+          signal: AbortSignal.timeout(5000), // 5 second timeout for test
+        }
+      );
+
+      if (testResponse.ok) {
+        return {
+          isConnected: true,
+          message: "Telnyx API connection successful",
+          details: {
+            status: testResponse.status,
+            statusText: testResponse.statusText,
+          },
+        };
+      } else {
+        const errorText = await testResponse.text();
+        return {
+          isConnected: false,
+          message: `Telnyx API test failed: ${testResponse.status} ${testResponse.statusText}`,
+          details: {
+            status: testResponse.status,
+            statusText: testResponse.statusText,
+            error: errorText,
+          },
+        };
+      }
+    } catch (error) {
+      return {
+        isConnected: false,
+        message: `Telnyx API connection test failed: ${
+          error instanceof Error ? error.message : "Unknown error"
+        }`,
+        details: { error },
+      };
+    }
+  }
+
+  /**
+   * Get available countries for pricing
+   * @returns Promise<string[]> - Array of supported country codes
+   */
+  static async getAvailableCountries(): Promise<string[]> {
+    try {
+      const apiKey = process.env.NEXT_PUBLIC_TELNYX_API_KEY;
+      if (!apiKey || apiKey.trim() === "" || apiKey.includes("your_")) {
+        // Return fallback countries if API key not configured
+        return Object.keys(this.REGIONAL_SIP_COSTS).filter(
+          (code) => code !== "DEFAULT"
+        );
+      }
+
+      // Try to fetch available countries from Telnyx API
+      const response = await fetch("https://api.telnyx.com/v2/pricing/voice", {
+        method: "GET",
+        headers: {
+          Authorization: `Bearer ${apiKey}`,
+          Accept: "application/json",
+        },
+        signal: AbortSignal.timeout(10000),
+      });
+
+      if (response.ok) {
+        const data = await response.json();
+        if (data.data && Array.isArray(data.data)) {
+          // Extract unique country codes from the response
+          const countryCodes: string[] = [];
+          for (const item of data.data) {
+            if (item.country_code && typeof item.country_code === "string") {
+              countryCodes.push(item.country_code);
+            }
+          }
+          const uniqueCountries = Array.from(new Set(countryCodes));
+          return uniqueCountries;
+        }
+      }
+
+      // Fallback to hardcoded countries if API call fails
+      return Object.keys(this.REGIONAL_SIP_COSTS).filter(
+        (code) => code !== "DEFAULT"
+      );
+    } catch (error) {
+      console.warn(
+        "Failed to fetch available countries from Telnyx API, using fallback:",
+        error
+      );
+      return Object.keys(this.REGIONAL_SIP_COSTS).filter(
+        (code) => code !== "DEFAULT"
+      );
+    }
+  }
+
+  /**
+   * Clear pricing cache for a specific country or all countries
+   * @param countryCode - Optional country code to clear, or undefined to clear all
+   */
+  static clearPricingCache(countryCode?: string): void {
+    if (countryCode) {
+      this.pricingCache.delete(countryCode.toUpperCase());
+      this.cacheExpiry.delete(countryCode.toUpperCase());
+      console.log(`Cleared pricing cache for ${countryCode}`);
+    } else {
+      this.pricingCache.clear();
+      this.cacheExpiry.clear();
+      console.log("Cleared all pricing cache");
+    }
+  }
+
+  /**
+   * Get cache statistics
+   * @returns Object with cache information
+   */
+  static getCacheStats(): {
+    totalEntries: number;
+    activeEntries: number;
+    expiredEntries: number;
+    cacheHitRate: number;
+  } {
+    const now = Date.now();
+    let activeEntries = 0;
+    let expiredEntries = 0;
+
+    const entries = Array.from(this.cacheExpiry.entries());
+    for (const [country, expiry] of entries) {
+      if (expiry > now) {
+        activeEntries++;
+      } else {
+        expiredEntries++;
+      }
+    }
+
+    const totalEntries = this.pricingCache.size;
+    const cacheHitRate =
+      totalEntries > 0 ? (activeEntries / totalEntries) * 100 : 0;
+
+    return {
+      totalEntries,
+      activeEntries,
+      expiredEntries,
+      cacheHitRate: Math.round(cacheHitRate * 100) / 100, // Round to 2 decimal places
+    };
+  }
+
+  /**
+   * Force refresh pricing for a specific country
+   * @param countryCode - Country code to refresh
+   * @returns Promise<TelnyxApiPricing | null> - Fresh pricing data
+   */
+  static async forceRefreshPricing(
+    countryCode: string
+  ): Promise<TelnyxApiPricing | null> {
+    // Clear existing cache for this country
+    this.clearPricingCache(countryCode);
+
+    // Fetch fresh pricing
+    return await this.fetchTelnyxPricing(countryCode);
   }
 }
