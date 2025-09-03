@@ -1061,7 +1061,7 @@ export const useTelnyxWebRTC = (
         ? Math.floor((Date.now() - callStartTime) / 1000)
         : 0;
 
-      // Determine call status based on duration and call state
+      // Determine call status based on duration, call state, and hangup reason
       let callStatus: "completed" | "failed" | "voicemail" = "completed";
       let errorMessage = "";
       let isUserHangup = false;
@@ -1079,15 +1079,67 @@ export const useTelnyxWebRTC = (
           // Longer voice mail call - likely completed message
           errorMessage = "Call forwarded to voice mail - Message left";
         }
-      } else if (duration < 2) {
-        // Very short call - likely invalid number
-        callStatus = "failed";
-        errorMessage =
-          "Call failed - Invalid phone number or number not reachable";
-      } else if (duration < 5) {
-        // Short call - might be temporary unavailability
-        callStatus = "failed";
-        errorMessage = "Call failed - Number temporarily unavailable";
+      } else {
+        // Analyze hangup reason and duration to determine the cause
+        const hangupReason = call?.reason || "";
+        const hangupError = call?.error || "";
+
+        console.log("📞 Hangup analysis:", {
+          duration,
+          callState,
+          hangupReason,
+          hangupError,
+          wasInEarlyState: callState === "ringing" && duration < 10,
+        });
+
+        // Detect call rejection scenarios
+        if (callState === "ringing" && duration < 10) {
+          // Call was rejected while ringing (went from early to hangup quickly)
+          callStatus = "failed";
+          errorMessage = "Call rejected - The other party declined the call";
+        } else if (duration < 2) {
+          // Very short call - likely invalid number or immediate rejection
+          callStatus = "failed";
+          if (hangupReason.includes("busy") || hangupError.includes("busy")) {
+            errorMessage = "Call failed - Number is busy";
+          } else if (
+            hangupReason.includes("no-answer") ||
+            hangupError.includes("no-answer")
+          ) {
+            errorMessage = "Call failed - No answer";
+          } else {
+            errorMessage =
+              "Call failed - Invalid phone number or number not reachable";
+          }
+        } else if (duration < 5) {
+          // Short call - might be temporary unavailability or rejection
+          callStatus = "failed";
+          if (hangupReason.includes("busy") || hangupError.includes("busy")) {
+            errorMessage = "Call failed - Number is busy";
+          } else if (
+            hangupReason.includes("no-answer") ||
+            hangupError.includes("no-answer")
+          ) {
+            errorMessage = "Call failed - No answer";
+          } else {
+            errorMessage = "Call failed - Number temporarily unavailable";
+          }
+        } else if (
+          hangupReason.includes("busy") ||
+          hangupError.includes("busy")
+        ) {
+          // Call was busy
+          callStatus = "failed";
+          errorMessage = "Call failed - Number is busy";
+        } else if (
+          hangupReason.includes("no-answer") ||
+          hangupError.includes("no-answer")
+        ) {
+          // No answer
+          callStatus = "failed";
+          errorMessage = "Call failed - No answer";
+        }
+        // If none of the above conditions match, it's considered a completed call
       }
 
       // Set error if call failed or voice mail (but only if not already set)
@@ -1690,11 +1742,7 @@ export const useTelnyxWebRTC = (
 
   const forceResetCallState = useCallback(() => {
     // Properly transition to ended state first, then to idle
-    if (
-      callState === "ringing" ||
-      callState === "dialing" ||
-      callState === "trying"
-    ) {
+    if (callState === "ringing" || callState === "dialing") {
       transitionCallState("ended");
       // Let the ended state handler transition to idle
     } else {

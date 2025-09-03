@@ -446,10 +446,7 @@ export const useDialer = (telnyxActions: {
 
   // Effects - placed after all actions are defined to avoid circular dependencies
   useEffect(() => {
-    if (
-      telnyxActions.error &&
-      (telnyxActions.isConnecting || telnyxActions.isCallActive)
-    ) {
+    if (telnyxActions.error) {
       // Check if this is a call failure error that should show popup
       const isCallFailure =
         telnyxActions.error.includes("invalid") ||
@@ -460,16 +457,21 @@ export const useDialer = (telnyxActions: {
         telnyxActions.error.includes("timeout") ||
         telnyxActions.error.includes("voice mail") ||
         telnyxActions.error.includes("User hung up") ||
-        telnyxActions.error.includes("Message left");
+        telnyxActions.error.includes("Message left") ||
+        telnyxActions.error.includes("Call rejected") ||
+        telnyxActions.error.includes("declined");
 
       if (isCallFailure) {
-        // For call failures, immediately redirect to dialpad and show error popup
+        // For call failures, show error popup and redirect to dialpad
         setErrorMessageAction(telnyxActions.error);
         setShowErrorPopup(true);
-        // Force immediate return to dialpad
-        telnyxActions.forceResetCallState();
-      } else {
-        // For other errors, just reset after 1.5 seconds
+
+        // Only force reset if we're still in a call state
+        if (telnyxActions.isConnecting || telnyxActions.isCallActive) {
+          telnyxActions.forceResetCallState();
+        }
+      } else if (telnyxActions.isConnecting || telnyxActions.isCallActive) {
+        // For other errors during active calls, just reset after 1.5 seconds
         const resetTimeout = setTimeout(() => {
           telnyxActions.forceResetCallState();
         }, 1500);
@@ -505,13 +507,12 @@ export const useDialer = (telnyxActions: {
   // Increased timeout for international calls which may take longer to connect
   useEffect(() => {
     // Only trigger early failure if we're in "trying" or "dialing" state AND not connecting AND not call active
-    // AND we're not in "ringing" state (which means the call is progressing normally)
+    // Don't timeout if we're ringing (which means the call is progressing normally)
     if (
       (telnyxActions.callState === "trying" ||
         telnyxActions.callState === "dialing") &&
       !telnyxActions.isCallActive &&
-      !telnyxActions.isConnecting &&
-      telnyxActions.callState !== "ringing" // Don't timeout if we're ringing
+      !telnyxActions.isConnecting
     ) {
       console.log("🚨 Setting early failure timeout for 45 seconds");
       console.log("🚨 Current call state:", telnyxActions.callState);
