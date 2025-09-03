@@ -64,6 +64,7 @@ The ContactOut Dialer uses a **hybrid pricing system** that combines real-time T
 | India          | IN   | $0.0025  | ✅ Fallback |
 | Brazil         | BR   | $0.0030  | ✅ Fallback |
 | Mexico         | MX   | $0.0028  | ✅ Fallback |
+| Philippines    | PH   | $0.0035  | ✅ Fallback |
 | Other          | -    | $0.0010  | 🔴 Default  |
 
 ## Failed Call Costs

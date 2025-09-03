@@ -139,6 +139,9 @@ export const useTelnyxWebRTC = (
     null
   );
 
+  // Use ref to track current call state to avoid stale closures in monitor
+  const currentCallStateRef = useRef<CallState>(callState);
+
   // Audio state
   const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState(false);
   const [networkQuality, setNetworkQuality] = useState<NetworkQuality>("good");
@@ -196,8 +199,14 @@ export const useTelnyxWebRTC = (
 
   const transitionCallState = useCallback(
     (newState: CallState, call?: any) => {
+      console.log(`🔄 TRANSITION CALL STATE - Attempting: ${newState}`);
       setCallState((currentState) => {
+        console.log(
+          `🔄 State transition attempt: ${currentState} -> ${newState}`
+        );
+
         if (currentState === newState) {
+          console.log(`🔄 State unchanged: ${currentState}`);
           return currentState;
         }
 
@@ -208,13 +217,25 @@ export const useTelnyxWebRTC = (
           ringing: ["connected", "voicemail", "ended"],
           connected: ["ended"],
           voicemail: ["ended"],
-          ended: ["idle"],
+          ended: ["idle", "ringing"], // Allow recovery from ended to ringing when ICE connection is established
         };
 
         if (!validTransitions[currentState].includes(newState)) {
+          console.log(
+            `❌ Invalid state transition: ${currentState} -> ${newState}`
+          );
+          console.log(
+            `❌ Valid transitions from ${currentState}:`,
+            validTransitions[currentState]
+          );
           return currentState;
         }
 
+        console.log(
+          `✅ Valid state transition: ${currentState} -> ${newState}`
+        );
+        // Update the ref to track current state
+        currentCallStateRef.current = newState;
         return newState;
       });
 
@@ -263,6 +284,10 @@ export const useTelnyxWebRTC = (
           setIsConnecting(false);
           setIsCallActive(false);
           setError(null);
+          // Automatically transition to idle after a short delay to show the ended state
+          setTimeout(() => {
+            transitionCallState("idle");
+          }, 1000); // 1 second delay to show the ended state
           break;
       }
     },
@@ -590,6 +615,9 @@ export const useTelnyxWebRTC = (
       // Call events - PRIMARY CALL HANDLER (replaces call.on() events)
       telnyxClient.on("call", (call: any) => {
         // Telnyx client call event received
+        console.log(
+          `🎯 PRIMARY CALL HANDLER TRIGGERED - Call state: ${call?.state}`
+        );
 
         // PRIMARY CALL HANDLER - This is now our main way to handle calls
         if (call && call.state) {
@@ -602,12 +630,9 @@ export const useTelnyxWebRTC = (
 
           // Primary call handler
 
-          // IMMEDIATE FAILURE DETECTION - Handle quick failures first
-          if (
-            (call.state === "hangup" || call.state === "destroy") &&
-            callState === "dialing"
-          ) {
-            if (callDuration < 1.5) {
+          // IMMEDIATE FAILURE DETECTION - Only for actual failures, not normal call endings
+          if (call.state === "failed" && callState === "dialing") {
+            if (callDuration < 3) {
               // Immediate failure detected
               // Set error and immediately transition to idle
               setError((prevError) => {
@@ -655,55 +680,8 @@ export const useTelnyxWebRTC = (
             }
           }
 
-          // Handle all state transitions
-          switch (call.state) {
-            case "requesting":
-              if (callState !== "dialing") {
-                transitionCallState("dialing", call);
-              }
-              break;
-
-            case "trying":
-              // For international calls, "trying" state can persist longer
-              // Transition to dialing state but also set up timeout monitoring
-              if (callState !== "dialing") {
-                transitionCallState("dialing", call);
-              }
-              break;
-
-            case "ringing":
-              if (callState !== "ringing") {
-                transitionCallState("ringing", call);
-              }
-              break;
-
-            case "answered":
-              if (callState !== "connected" && callState !== "voicemail") {
-                // Check if this is likely voice mail
-                const callDuration = callStartTime
-                  ? Math.floor((Date.now() - callStartTime) / 1000)
-                  : 0;
-
-                if (detectVoiceMail(call, callDuration)) {
-                  transitionCallState("voicemail", call);
-                } else {
-                  transitionCallState("connected", call);
-                }
-              }
-              break;
-
-            case "hangup":
-              handleCallHangup(call, currentDialedNumber || "");
-              break;
-
-            case "destroy":
-              handleCallDestroy(call, currentDialedNumber || "");
-              break;
-
-            case "failed":
-              handleCallFailed(call, currentDialedNumber || "");
-              break;
-          }
+          // State transitions are now handled in the call monitoring interval
+          // This event handler is only for initial call creation
         }
       });
 
@@ -796,9 +774,12 @@ export const useTelnyxWebRTC = (
       // Store call start time locally to avoid state update delays
       const localCallStartTime = Date.now();
 
-      // Transition to dialing state
-      transitionCallState("dialing", call);
+      // DON'T transition to dialing state here - let the monitor handle it based on actual Telnyx call states
+      console.log(
+        "🔄 HANDLE CALL CREATION - Call created, monitor will handle state transitions"
+      );
 
+      // Start monitoring immediately - no delay needed since we're not setting UI state here
       // AGGRESSIVE CALL STATE MONITORING - Check every 100ms for immediate response
       const callStateMonitor = setInterval(() => {
         if (!call || !call.state) {
@@ -810,18 +791,57 @@ export const useTelnyxWebRTC = (
         const currentTime = Date.now();
         const callDuration = (currentTime - localCallStartTime) / 1000;
 
+        // Read current UI state from ref to avoid stale closure
+        const currentUIState = currentCallStateRef.current;
         console.log(
-          `🔍 Call State Monitor: ${call.state} (${callDuration.toFixed(1)}s)`
+          `🔍 Call State Monitor: ${call.state} (${callDuration.toFixed(
+            1
+          )}s) - UI State: ${currentUIState}`
         );
 
-        // IMMEDIATE FAILURE DETECTION - If call fails within 2 seconds
+        // DEBUG: Log the actual state values to understand the discrepancy
+        console.log(
+          `🔍 DEBUG: callState=${callState}, currentUIState=${currentUIState}, refState=${currentCallStateRef.current}`
+        );
+
+        // CRITICAL FIX: If we're in "trying" state but UI is still "idle", force the transition
+        if (call.state === "trying" && currentUIState === "idle") {
+          console.log(
+            "🚨 CRITICAL FIX: Trying state but UI is idle - forcing transition to dialing"
+          );
+          setCallState("dialing");
+          // Force immediate state update and skip this cycle
+          return;
+        }
+
+        // CRITICAL FIX: If we're in "early" state but UI is still "idle", force the transition
+        if (call.state === "early" && currentUIState === "idle") {
+          console.log(
+            "🚨 CRITICAL FIX: Early state but UI is idle - forcing transition to ringing"
+          );
+          setCallState("ringing");
+          // Force immediate state update and skip this cycle
+          return;
+        }
+
+        // IMMEDIATE FAILURE DETECTION - Only for actual failures, not normal call endings
+        // hangup and destroy are normal end states, not failures
+        console.log(
+          `🔍 Checking failure detection: duration=${callDuration.toFixed(
+            1
+          )}s, state=${call.state}, UI state=${currentUIState}`
+        );
         if (
-          callDuration < 2 &&
-          (call.state === "hangup" || call.state === "destroy")
+          callDuration < 3 &&
+          call.state === "failed" && // Only treat "failed" state as actual failure
+          currentUIState === "dialing" // Only treat as failure if we're still in dialing state
         ) {
           console.log(
-            "🚨 IMMEDIATE FAILURE DETECTED - Call failed in <2 seconds"
+            "🚨 IMMEDIATE FAILURE DETECTED - Call failed in <5 seconds"
           );
+          console.log("🚨 Call state:", call.state);
+          console.log("🚨 UI state:", callState);
+          console.log("🚨 Call duration:", callDuration.toFixed(1), "seconds");
 
           // Set error FIRST before any state changes
           console.log("🚨 Setting error state for failed call");
@@ -866,22 +886,158 @@ export const useTelnyxWebRTC = (
           return;
         }
 
-        // Handle state transitions (duplicate removed)
-        // State transitions are handled in the primary call handler above
+        // Handle state transitions in the monitoring interval
+        // This is where we actually detect state changes
+        console.log(
+          `🔍 Monitor: Processing state ${call.state} with UI state ${currentUIState}`
+        );
+        switch (call.state) {
+          case "new":
+            // Call just created - transition to dialing
+            if (currentUIState === "idle") {
+              console.log("📞 Monitor: new call - transitioning to dialing");
+              transitionCallState("dialing", call);
+            }
+            break;
+
+          case "requesting":
+            // Call is being requested - ensure we're in dialing state
+            if (currentUIState === "idle") {
+              console.log("📞 Monitor: requesting - transitioning to dialing");
+              transitionCallState("dialing", call);
+            }
+            break;
+
+          case "trying":
+            // Call is trying to connect - ensure we're in dialing state
+            if (currentUIState === "idle") {
+              console.log("📞 Monitor: trying - transitioning to dialing");
+              transitionCallState("dialing", call);
+            }
+            break;
+
+          case "ringing":
+            if (currentUIState !== "ringing") {
+              console.log("📞 Monitor: transitioning to ringing");
+              transitionCallState("ringing", call);
+            }
+            break;
+
+          case "early":
+            // Always transition to ringing when we reach early state (ICE connection established)
+            console.log(
+              `📞 Monitor: early state detected - currentUIState: ${currentUIState}`
+            );
+            if (
+              currentUIState !== "ringing" &&
+              currentUIState !== "connected"
+            ) {
+              console.log("📞 Monitor: early state - transitioning to ringing");
+              transitionCallState("ringing", call);
+            } else {
+              console.log(
+                `📞 Monitor: early state - no transition needed, currentUIState: ${currentUIState}`
+              );
+            }
+            break;
+
+          case "answered":
+            if (
+              currentUIState !== "connected" &&
+              currentUIState !== "voicemail"
+            ) {
+              const callDuration = callStartTime
+                ? Math.floor((Date.now() - callStartTime) / 1000)
+                : 0;
+
+              if (detectVoiceMail(call, callDuration)) {
+                console.log("📞 Monitor: transitioning to voicemail");
+                transitionCallState("voicemail", call);
+              } else {
+                console.log("📞 Monitor: transitioning to connected");
+                transitionCallState("connected", call);
+              }
+            }
+            break;
+
+          case "connected":
+            if (currentUIState !== "connected") {
+              console.log("📞 Monitor: transitioning to connected");
+              transitionCallState("connected", call);
+            }
+            break;
+
+          case "hangup":
+            console.log("📞 Monitor: hangup detected - call ended normally");
+            console.log(
+              `📞 Hangup details: state=${call.state}, error=${call.error}, reason=${call.reason}, id=${call.id}`
+            );
+            // Transition to ended state before handling hangup
+            if (currentUIState !== "ended") {
+              console.log("📞 Monitor: transitioning to ended state");
+              transitionCallState("ended", call);
+            }
+            // hangup is a normal end state, not a failure
+            handleCallHangup(call, phoneNumber);
+            // Stop monitoring after handling hangup
+            clearInterval(callStateMonitor);
+            return;
+
+          case "destroy":
+            console.log("📞 Monitor: destroy detected - call cleanup");
+            console.log(
+              `📞 Destroy details: state=${call.state}, error=${call.error}, reason=${call.reason}, id=${call.id}`
+            );
+            // Transition to ended state before handling destroy
+            if (currentUIState !== "ended") {
+              console.log("📞 Monitor: transitioning to ended state");
+              transitionCallState("ended", call);
+            }
+            // destroy is a normal cleanup state, not a failure
+            handleCallDestroy(call, phoneNumber);
+            // Stop monitoring after handling destroy
+            clearInterval(callStateMonitor);
+            return;
+
+          case "failed":
+            console.log("📞 Monitor: failed detected - handling failure");
+            handleCallFailed(call, phoneNumber);
+            break;
+        }
 
         // TIMEOUT HANDLING - If call is stuck in connecting/trying for too long
+        // Increased timeout for international calls which can take longer to establish ICE connection
+        // Only timeout if we're still in early connection stages
         if (
           (call.state === "connecting" || call.state === "trying") &&
-          callDuration > 8
+          callDuration > 45 && // Increased from 15s to 45s for international calls
+          call.state !== "early" // Don't timeout if we've reached "early" state (ICE connection established)
         ) {
           console.log(
             "🚨 Call timeout detected - logging failed call to Supabase"
+          );
+          console.log(
+            `🚨 Call state: ${call.state}, Duration: ${callDuration.toFixed(
+              1
+            )}s`
           );
           // Log the call to Supabase before handling failure
           trackCall(call, "failed", Math.floor(callDuration), phoneNumber);
           notifyCallStatus("failed", phoneNumber);
           handleCallFailed(call, phoneNumber);
           clearInterval(callStateMonitor);
+        }
+
+        // CLEANUP MONITORING - Only stop monitoring after we've handled the state transition
+        // Don't stop monitoring for hangup/destroy - let the switch statement handle them first
+        if (call.state === "connected" || call.state === "failed") {
+          console.log(`📞 Call monitoring cleanup - call state: ${call.state}`);
+          console.log(`📞 Current UI call state: ${currentUIState}`);
+          console.log(
+            `📞 Should trigger UI state transition for: ${call.state}`
+          );
+          clearInterval(callStateMonitor);
+          return; // Exit the monitor loop
         }
       }, 100); // Check every 100ms for immediate response
 
@@ -964,6 +1120,25 @@ export const useTelnyxWebRTC = (
       // Notify status
       notifyCallStatus(callStatus, phoneNumber);
 
+      // Properly terminate the call if it's still active
+      if (call && typeof call.hangup === "function") {
+        try {
+          console.log("📞 Terminating call on hangup");
+          call.hangup();
+        } catch (error: any) {
+          // Filter out common hangup errors that don't indicate real problems
+          if (
+            error?.code === -32002 &&
+            error?.message === "CALL DOES NOT EXIST"
+          ) {
+            // This is expected when the call has already ended
+            console.log("📞 Call already terminated");
+          } else {
+            console.error("Error hanging up call:", error);
+          }
+        }
+      }
+
       // Clean up call state
       setCurrentCall(null);
       setCallControlId(null);
@@ -1011,6 +1186,25 @@ export const useTelnyxWebRTC = (
 
       // Notify status
       notifyCallStatus(callStatus, phoneNumber);
+
+      // Properly terminate the call if it's still active
+      if (call && typeof call.hangup === "function") {
+        try {
+          console.log("📞 Terminating call on destroy");
+          call.hangup();
+        } catch (error: any) {
+          // Filter out common hangup errors that don't indicate real problems
+          if (
+            error?.code === -32002 &&
+            error?.message === "CALL DOES NOT EXIST"
+          ) {
+            // This is expected when the call has already ended
+            console.log("📞 Call already terminated");
+          } else {
+            console.error("Error hanging up call:", error);
+          }
+        }
+      }
 
       // Clean up call state
       setCurrentCall(null);
@@ -1253,13 +1447,24 @@ export const useTelnyxWebRTC = (
 
   const makeCall = useCallback(
     async (phoneNumber: string) => {
+      console.log("🚀 MAKE CALL FUNCTION CALLED - Starting call process");
+      // Convert phone number to E.164 format for Telnyx
+      const { toE164 } = await import("@/lib/phoneNumberUtils");
+      const e164Number = toE164(phoneNumber);
+      console.log(`📞 Making call: ${phoneNumber} -> E.164: ${e164Number}`);
+      console.log(`📞 E.164 conversion successful - using: ${e164Number}`);
+
       // Enhanced validation - check both connection and microphone
+      console.log("🚀 MAKE CALL - Checking client:", !!client);
       if (!client) {
+        console.log("🚨 MAKE CALL - Client not initialized");
         setError("Telnyx client not initialized");
         return;
       }
 
+      console.log("🚀 MAKE CALL - Checking connection:", isConnected);
       if (!isConnected) {
+        console.log("🚨 MAKE CALL - Not connected to Telnyx");
         setError(
           "Not connected to Telnyx. Please wait for connection or check credentials."
         );
@@ -1271,7 +1476,12 @@ export const useTelnyxWebRTC = (
         return;
       }
 
+      console.log(
+        "🚀 MAKE CALL - Checking microphone access:",
+        hasMicrophoneAccess
+      );
       if (!hasMicrophoneAccess) {
+        console.log("🚨 MAKE CALL - No microphone access");
         setError(
           "Microphone access required for calls. Please allow microphone permissions."
         );
@@ -1280,7 +1490,13 @@ export const useTelnyxWebRTC = (
 
       // Phone number validation
       const cleanedNumber = phoneNumber.replace(/[^\d+]/g, "");
+      console.log("🚀 MAKE CALL - Phone number validation:", {
+        phoneNumber,
+        cleanedNumber,
+        length: cleanedNumber.length,
+      });
       if (cleanedNumber.length < 7) {
+        console.log("🚨 MAKE CALL - Phone number too short");
         setError("Phone number must be at least 7 digits");
         return;
       }
@@ -1288,6 +1504,10 @@ export const useTelnyxWebRTC = (
       try {
         setIsConnecting(true);
         setError(null);
+        // DON'T set UI state here - let the monitor handle it based on actual Telnyx call states
+        console.log(
+          "🚀 About to create Telnyx call - UI state will be set by monitor"
+        );
 
         // Create call using Telnyx best practices
         let call: any;
@@ -1295,7 +1515,7 @@ export const useTelnyxWebRTC = (
         // Use the standard newCall method with proper parameters
         if (typeof client.newCall === "function") {
           call = client.newCall({
-            destinationNumber: phoneNumber,
+            destinationNumber: e164Number,
             callerNumber: config.phoneNumber,
             // Add call options for better quality
             audio: true,
@@ -1308,14 +1528,14 @@ export const useTelnyxWebRTC = (
           });
         } else if (typeof (client as any).call === "function") {
           call = (client as any).call({
-            destinationNumber: phoneNumber,
+            destinationNumber: e164Number,
             callerNumber: config.phoneNumber,
             audio: true,
             video: false,
           });
         } else if (typeof (client as any).createCall === "function") {
           call = (client as any).createCall({
-            destinationNumber: phoneNumber,
+            destinationNumber: e164Number,
             callerNumber: config.phoneNumber,
             audio: true,
             video: false,
@@ -1469,8 +1689,18 @@ export const useTelnyxWebRTC = (
   }, []);
 
   const forceResetCallState = useCallback(() => {
-    transitionCallState("idle");
-  }, [transitionCallState]);
+    // Properly transition to ended state first, then to idle
+    if (
+      callState === "ringing" ||
+      callState === "dialing" ||
+      callState === "trying"
+    ) {
+      transitionCallState("ended");
+      // Let the ended state handler transition to idle
+    } else {
+      transitionCallState("idle");
+    }
+  }, [transitionCallState, callState]);
 
   // Function to properly handle call failure completion (called by error popup)
   const completeCallFailure = useCallback(() => {

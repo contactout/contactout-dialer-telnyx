@@ -44,6 +44,7 @@ export class TelnyxCostCalculator {
     IN: 0.0025, // India
     BR: 0.003, // Brazil
     MX: 0.0028, // Mexico
+    PH: 0.0035, // Philippines
     DEFAULT: 0.001, // Default for other regions
   };
 
@@ -272,6 +273,7 @@ export class TelnyxCostCalculator {
     if (digits.startsWith("91")) return "IN"; // India
     if (digits.startsWith("55")) return "BR"; // Brazil
     if (digits.startsWith("52")) return "MX"; // Mexico
+    if (digits.startsWith("63")) return "PH"; // Philippines
 
     return undefined; // Unknown country
   }

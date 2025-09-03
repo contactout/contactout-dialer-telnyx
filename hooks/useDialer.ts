@@ -266,35 +266,59 @@ export const useDialer = (telnyxActions: {
   }, [phoneNumber, setPhoneNumber]);
 
   const handleCall = useCallback(() => {
+    console.log("🚀 HANDLE CALL - Function called");
+    console.log("🚀 HANDLE CALL - Phone number:", phoneNumber);
+    console.log("🚀 HANDLE CALL - Is valid:", isPhoneNumberValid);
     if (!isPhoneNumberValid || !phoneNumber) {
+      console.log("🚨 HANDLE CALL - Invalid phone number");
       setErrorMessageAction("Please enter a valid phone number");
       return;
     }
 
+    console.log(
+      "🚀 HANDLE CALL - Checking if already connecting/active:",
+      telnyxActions.isConnecting,
+      telnyxActions.isCallActive
+    );
     if (telnyxActions.isConnecting || telnyxActions.isCallActive) {
+      console.log("🚨 HANDLE CALL - Call already in progress");
       setErrorMessageAction("Call already in progress");
       return;
     }
 
+    console.log(
+      "🚀 HANDLE CALL - Checking microphone access:",
+      telnyxActions.hasMicrophoneAccess
+    );
     if (!telnyxActions.hasMicrophoneAccess) {
+      console.log("🚨 HANDLE CALL - No microphone access");
       setErrorMessageAction("Microphone access required");
       return;
     }
 
     try {
       // Security validation
+      console.log("🚀 HANDLE CALL - Starting security validation");
       const securityValidation =
         securityManager.validatePhoneNumber(phoneNumber);
+      console.log(
+        "🚀 HANDLE CALL - Security validation result:",
+        securityValidation
+      );
       if (securityValidation.riskLevel === "high") {
+        console.log("🚨 HANDLE CALL - High risk phone number");
         setErrorMessageAction("Invalid phone number format");
         return;
       }
 
       // Rate limiting for call attempts
+      console.log("🚀 HANDLE CALL - Checking rate limit");
       const rateLimit = securityManager.checkRateLimit(
         `call_attempt_${userId}`
       );
+      console.log("🚀 HANDLE CALL - Rate limit result:", rateLimit);
       if (!rateLimit.isAllowed) {
+        console.log("🚨 HANDLE CALL - Rate limit exceeded");
         const errorMessage =
           "Too many call attempts. Please wait before trying again.";
         setErrorMessageAction(errorMessage);
@@ -307,7 +331,9 @@ export const useDialer = (telnyxActions: {
         return;
       }
 
+      console.log("🚀 HANDLE CALL - About to call telnyxActions.makeCall");
       telnyxActions.makeCall(phoneNumber);
+      console.log("🚀 HANDLE CALL - telnyxActions.makeCall called");
     } catch (error) {
       setErrorMessageAction("Error initiating call");
       logError("Call initiation error", {
@@ -465,7 +491,7 @@ export const useDialer = (telnyxActions: {
     if (telnyxActions.isConnecting && !telnyxActions.isCallActive) {
       const safetyTimeout = setTimeout(() => {
         telnyxActions.forceResetCallState();
-      }, 5000); // 5 seconds safety timeout
+      }, 10000); // 10 seconds safety timeout for international calls
 
       return () => clearTimeout(safetyTimeout);
     }
@@ -478,23 +504,48 @@ export const useDialer = (telnyxActions: {
   // Early failure detection for calls stuck in "trying" state
   // Increased timeout for international calls which may take longer to connect
   useEffect(() => {
-    if (telnyxActions.callState === "trying" && !telnyxActions.isCallActive) {
+    // Only trigger early failure if we're in "trying" or "dialing" state AND not connecting AND not call active
+    // AND we're not in "ringing" state (which means the call is progressing normally)
+    if (
+      (telnyxActions.callState === "trying" ||
+        telnyxActions.callState === "dialing") &&
+      !telnyxActions.isCallActive &&
+      !telnyxActions.isConnecting &&
+      telnyxActions.callState !== "ringing" // Don't timeout if we're ringing
+    ) {
+      console.log("🚨 Setting early failure timeout for 45 seconds");
+      console.log("🚨 Current call state:", telnyxActions.callState);
+      console.log("🚨 Is call active:", telnyxActions.isCallActive);
+      console.log("🚨 Is connecting:", telnyxActions.isConnecting);
+      console.log(
+        "🚨 Timeout will trigger at:",
+        new Date(Date.now() + 45000).toLocaleTimeString()
+      );
       const earlyFailureTimeout = setTimeout(() => {
-        // If call has been in "trying" state for more than 5 seconds, force failure
+        // If call has been in "trying" state for more than 45 seconds, force failure
         // This gives international calls more time to connect
         console.log(
           "🚨 Early failure detection triggered - call stuck in trying state"
         );
+        console.log("🚨 Call state:", telnyxActions.callState);
+        console.log("🚨 Is call active:", telnyxActions.isCallActive);
+        console.log("🚨 Is connecting:", telnyxActions.isConnecting);
+        console.log("🚨 Timeout duration: 45 seconds");
+        console.log(
+          "🚨 Timeout triggered at:",
+          new Date().toLocaleTimeString()
+        );
         setErrorMessageAction("Call failed - Number not reachable");
         setShowErrorPopup(true);
         telnyxActions.forceResetCallState();
-      }, 5000); // 5 seconds for early failure detection (increased from 2 seconds)
+      }, 45000); // 45 seconds for early failure detection (increased for international calls)
 
       return () => clearTimeout(earlyFailureTimeout);
     }
   }, [
     telnyxActions.callState,
     telnyxActions.isCallActive,
+    telnyxActions.isConnecting,
     telnyxActions.forceResetCallState,
     setErrorMessageAction,
     setShowErrorPopup,

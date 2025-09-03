@@ -114,6 +114,15 @@ export const COUNTRY_CODES: Record<string, CountryInfo> = {
     maxLength: 10,
     format: "XXX XXX XXXX",
   },
+  PH: {
+    code: "PH",
+    name: "Philippines",
+    dialCode: "63",
+    flag: "🇵🇭",
+    minLength: 10,
+    maxLength: 10,
+    format: "XXX XXX XXXX",
+  },
 };
 
 // Common country code patterns
@@ -127,6 +136,7 @@ const COUNTRY_CODE_PATTERNS = [
   { code: "91", countries: ["IN"] },
   { code: "55", countries: ["BR"] },
   { code: "52", countries: ["MX"] },
+  { code: "63", countries: ["PH"] },
 ];
 
 /**
@@ -152,12 +162,20 @@ export function cleanPhoneNumber(input: string): string {
 export function detectCountry(phoneNumber: string): CountryInfo | null {
   const cleaned = cleanPhoneNumber(phoneNumber);
 
-  // Check for international format
+  // Check for international format (with +)
   if (cleaned.startsWith("+")) {
     const countryCode = cleaned.substring(1);
 
     for (const pattern of COUNTRY_CODE_PATTERNS) {
       if (countryCode.startsWith(pattern.code)) {
+        const country = COUNTRY_CODES[pattern.countries[0]];
+        if (country) return country;
+      }
+    }
+  } else {
+    // Check for numbers that start with country codes (without +)
+    for (const pattern of COUNTRY_CODE_PATTERNS) {
+      if (cleaned.startsWith(pattern.code)) {
         const country = COUNTRY_CODES[pattern.countries[0]];
         if (country) return country;
       }
@@ -212,6 +230,8 @@ export function formatPhoneNumber(
       return formatBrazilianNumber(nationalNumber);
     case "MX":
       return formatMexicanNumber(nationalNumber);
+    case "PH":
+      return formatPhilippineNumber(nationalNumber);
     default:
       return cleaned;
   }
@@ -341,6 +361,20 @@ function formatMexicanNumber(number: string): string {
 }
 
 /**
+ * Format Philippine phone number: 917 123 4567
+ */
+function formatPhilippineNumber(number: string): string {
+  const cleaned = number.replace(/\D/g, "");
+  if (cleaned.length === 10) {
+    return `${cleaned.substring(0, 3)} ${cleaned.substring(
+      3,
+      6
+    )} ${cleaned.substring(6)}`;
+  }
+  return number;
+}
+
+/**
  * Convert phone number to E.164 format
  */
 export function toE164(phoneNumber: string, country?: CountryInfo): string {
@@ -354,8 +388,14 @@ export function toE164(phoneNumber: string, country?: CountryInfo): string {
     return cleaned;
   }
 
-  // Add country code
-  return `+${detectedCountry.dialCode}${cleaned}`;
+  // Remove existing country code if present
+  let nationalNumber = cleaned;
+  if (cleaned.startsWith(detectedCountry.dialCode)) {
+    nationalNumber = cleaned.substring(detectedCountry.dialCode.length);
+  }
+
+  // Add country code with +
+  return `+${detectedCountry.dialCode}${nationalNumber}`;
 }
 
 /**

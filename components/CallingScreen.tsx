@@ -120,11 +120,15 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
     if (error) return error;
     if (isCallActive) {
       if (callState === "voicemail") return "Voice Mail - Leave a message";
+      if (callState === "connected") return "Call Active";
       return "Call in progress";
     }
     if (isConnecting) {
+      if (callState === "requesting") return "Requesting...";
       if (callState === "trying") return "Connecting...";
       if (callState === "ringing") return "Ringing...";
+      if (callState === "early") return "Ringing...";
+      if (callState === "answered") return "Call Connected";
       return "Connecting...";
     }
     return "Call ended";
