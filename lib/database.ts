@@ -299,7 +299,7 @@ export class DatabaseService {
       try {
         // Validate required fields
         if (!callData.user_id || !callData.phone_number) {
-          console.error("Missing required fields for call tracking:", callData);
+          // Missing required fields for call tracking
           return;
         }
 
@@ -362,10 +362,10 @@ export class DatabaseService {
         return; // Success, exit retry loop
       } catch (error) {
         retryCount++;
-        console.error(`Call tracking attempt ${retryCount} failed:`, error);
+        // Call tracking attempt failed
 
         if (retryCount >= maxRetries) {
-          console.error("Max retries reached for call tracking, giving up");
+          // Max retries reached for call tracking, giving up
           // Don't throw - we don't want call tracking to break the main functionality
           return;
         }

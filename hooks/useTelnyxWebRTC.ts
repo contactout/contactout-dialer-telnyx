@@ -487,13 +487,7 @@ export const useTelnyxWebRTC = (
 
       // Validate that we have a phone number
       if (!phoneNumber) {
-        console.error("No phone number available for call tracking:", {
-          phoneNumberOverride,
-          callDialedPhoneNumber: call?.dialedPhoneNumber,
-          currentDialedNumber,
-          callPhoneNumber: call.phoneNumber,
-          currentCallPhoneNumber: currentCall?.phoneNumber,
-        });
+        // No phone number available for call tracking
         return;
       }
 
@@ -505,7 +499,7 @@ export const useTelnyxWebRTC = (
         call_control_id: call.id || call.call_control_id, // Use call.id as fallback
         duration,
       }).catch((error) => {
-        console.error("DatabaseService.trackCall failed:", error);
+        // DatabaseService.trackCall failed
       });
     },
     [userId, currentDialedNumber, currentCall]
@@ -1606,7 +1600,7 @@ export const useTelnyxWebRTC = (
       setCallStartTime(null);
       setCurrentDialedNumber(null);
     } catch (error) {
-      console.error("🚨 Error in completeCallFailure:", error);
+      // Error in completeCallFailure
       // Fallback cleanup
       setCurrentCall(null);
       setCallControlId(null);

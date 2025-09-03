@@ -128,30 +128,10 @@ export const useDialer = (telnyxActions: {
     phoneNumber: process.env.NEXT_PUBLIC_TELNYX_PHONE_NUMBER || "",
   }).current;
 
-  // Track user changes for debugging
-
   // Validate phone number when it changes
   useEffect(() => {
     if (phoneNumber) {
       try {
-        // Security validation first
-        const securityValidation =
-          securityManager.validatePhoneNumber(phoneNumber);
-
-        if (securityValidation.riskLevel === "high") {
-          setValidationError("Invalid phone number format detected");
-          setIsPhoneNumberValid(false);
-          logError("High risk phone number input detected", {
-            level: "warning",
-            category: "security",
-            details: {
-              input: phoneNumber,
-              riskLevel: securityValidation.riskLevel,
-            },
-          });
-          return;
-        }
-
         // Basic validation
         const isValid =
           phoneNumber.length >= 7 && /^[\d\s\-\(\)\+]+$/.test(phoneNumber);
@@ -222,6 +202,18 @@ export const useDialer = (telnyxActions: {
     setErrorMessage(message);
   }, []);
 
+  // Helper function to show error popup and log error
+  const showError = useCallback(
+    (message: string, errorDetails?: any) => {
+      setErrorMessageAction(message);
+      setShowErrorPopup(true);
+      if (errorDetails) {
+        logError(message, errorDetails);
+      }
+    },
+    [setErrorMessageAction, setShowErrorPopup]
+  );
+
   const clearErrorAction = useCallback(() => {
     setErrorMessage("");
   }, []);
@@ -238,7 +230,13 @@ export const useDialer = (telnyxActions: {
     setShowDTMFSettings(false);
     setShowCallHistory(false);
     setShowErrorPopup(false);
-  }, []);
+  }, [
+    setShowAudioSettings,
+    setShowAudioTest,
+    setShowCallHistory,
+    setShowDTMFSettings,
+    setShowErrorPopup,
+  ]);
 
   // Business Logic
   const handleDigitPress = useCallback(
@@ -256,6 +254,7 @@ export const useDialer = (telnyxActions: {
       telnyxActions.isCallActive,
       telnyxActions.sendDTMF,
       setPhoneNumber,
+      telnyxActions,
     ]
   );
 
@@ -295,11 +294,7 @@ export const useDialer = (telnyxActions: {
         `call_attempt_${userId}`
       );
       if (!rateLimit.isAllowed) {
-        const errorMessage =
-          "Too many call attempts. Please wait before trying again.";
-        setErrorMessageAction(errorMessage);
-        setShowErrorPopup(true);
-        logError("Call rate limit exceeded", {
+        showError("Too many call attempts. Please wait before trying again.", {
           level: "warning",
           category: "security",
           details: { userId, rateLimit },
@@ -309,8 +304,7 @@ export const useDialer = (telnyxActions: {
 
       telnyxActions.makeCall(phoneNumber);
     } catch (error) {
-      setErrorMessageAction("Error initiating call");
-      logError("Call initiation error", {
+      showError("Error initiating call", {
         level: "error",
         category: "call",
         details: { phoneNumber, error },
@@ -322,7 +316,7 @@ export const useDialer = (telnyxActions: {
     telnyxActions,
     userId,
     setErrorMessageAction,
-    setShowErrorPopup,
+    showError,
   ]);
 
   const handleHangup = useCallback(() => {
@@ -437,8 +431,7 @@ export const useDialer = (telnyxActions: {
 
       if (isCallFailure) {
         // For call failures, show error popup and redirect to dialpad
-        setErrorMessageAction(telnyxActions.error);
-        setShowErrorPopup(true);
+        showError(telnyxActions.error);
 
         // Only force reset if we're still in a call state
         if (telnyxActions.isConnecting || telnyxActions.isCallActive) {
@@ -458,8 +451,7 @@ export const useDialer = (telnyxActions: {
     telnyxActions.isConnecting,
     telnyxActions.isCallActive,
     telnyxActions.forceResetCallState,
-    setErrorMessageAction,
-    setShowErrorPopup,
+    showError,
   ]);
 
   // Safety timeout to prevent calling screen from getting stuck indefinitely
@@ -491,8 +483,7 @@ export const useDialer = (telnyxActions: {
       const earlyFailureTimeout = setTimeout(() => {
         // If call has been in "trying" state for more than 45 seconds, force failure
         // This gives international calls more time to connect
-        setErrorMessageAction("Call failed - Number not reachable");
-        setShowErrorPopup(true);
+        showError("Call failed - Number not reachable");
         telnyxActions.forceResetCallState();
       }, 45000); // 45 seconds for early failure detection (increased for international calls)
 
@@ -503,18 +494,14 @@ export const useDialer = (telnyxActions: {
     telnyxActions.isCallActive,
     telnyxActions.isConnecting,
     telnyxActions.forceResetCallState,
-    setErrorMessageAction,
-    setShowErrorPopup,
+    showError,
   ]);
 
   // Voice mail detection and handling
   useEffect(() => {
     if (telnyxActions.callState === "voicemail") {
       // Show voice mail notification
-      setErrorMessageAction(
-        "Call forwarded to voice mail - You can leave a message"
-      );
-      setShowErrorPopup(true);
+      showError("Call forwarded to voice mail - You can leave a message");
 
       // Auto-hide after 5 seconds for voice mail
       const voiceMailTimeout = setTimeout(() => {
@@ -524,7 +511,12 @@ export const useDialer = (telnyxActions: {
 
       return () => clearTimeout(voiceMailTimeout);
     }
-  }, [telnyxActions.callState, setErrorMessageAction, setShowErrorPopup]);
+  }, [
+    telnyxActions.callState,
+    showError,
+    setShowErrorPopup,
+    setErrorMessageAction,
+  ]);
 
   // Clear countdown when call state changes to idle
   useEffect(() => {
