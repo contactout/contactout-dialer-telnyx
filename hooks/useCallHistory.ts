@@ -40,7 +40,6 @@ export const useCallHistory = () => {
 
       setCallHistory(data || []);
     } catch (err: any) {
-      console.error("Failed to fetch call history:", err);
       setError(err.message || "Failed to load call history");
     } finally {
       setLoading(false);
@@ -76,7 +75,6 @@ export const useCallHistory = () => {
 
       setCallHistory([]);
     } catch (err: any) {
-      console.error("Failed to clear call history:", err);
       setError(err.message || "Failed to clear call history");
     }
   }, [user?.id]);
@@ -94,7 +92,6 @@ export const useCallHistory = () => {
       // Remove from local state
       setCallHistory((prev) => prev.filter((call) => call.id !== callId));
     } catch (err: any) {
-      console.error("Failed to remove call:", err);
       setError(err.message || "Failed to remove call");
     }
   }, []);

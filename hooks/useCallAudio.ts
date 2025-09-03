@@ -41,9 +41,7 @@ export const useCallAudio = (
       if (context) {
         resumeAudioContext();
       }
-    } catch (error) {
-      console.error("Failed to initialize audio context:", error);
-    }
+    } catch (error) {}
   }, [getAudioContext, resumeAudioContext]);
 
   // Cleanup all audio
@@ -324,9 +322,7 @@ export const useCallAudio = (
       osc1.stop(now + 0.1);
       osc2.start(now + 0.1);
       osc2.stop(now + 0.2);
-    } catch (error) {
-      console.error("Failed to play call connected sound:", error);
-    }
+    } catch (error) {}
   }, [config.enabled, config.statusVolume]);
 
   // Call ended sound
@@ -370,9 +366,7 @@ export const useCallAudio = (
       osc1.stop(now + 0.1);
       osc2.start(now + 0.1);
       osc2.stop(now + 0.2);
-    } catch (error) {
-      console.error("Failed to play call ended sound:", error);
-    }
+    } catch (error) {}
   }, [config.enabled, config.statusVolume]);
 
   // Connecting sound (softer than ringtone)

@@ -59,13 +59,6 @@ export const useDialerConfig = (): DialerConfig => {
   // Log configuration issues
   useEffect(() => {
     if (configurationIssues.length > 0) {
-      console.error("Configuration issues detected:");
-      configurationIssues.forEach((issue) => {
-        console.error(`- ${issue}`);
-      });
-      console.error(
-        "This indicates an environment variable configuration issue."
-      );
     }
   }, [configurationIssues]);
 

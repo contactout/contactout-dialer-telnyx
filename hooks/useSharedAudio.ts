@@ -14,7 +14,6 @@ export const useSharedAudio = () => {
           audioContextRef.current.resume();
         }
       } catch (error) {
-        console.error("Failed to create audio context:", error);
         return null;
       }
     }
@@ -26,9 +25,7 @@ export const useSharedAudio = () => {
     if (context && context.state === "suspended") {
       try {
         await context.resume();
-      } catch (error) {
-        console.error("Failed to resume audio context:", error);
-      }
+      } catch (error) {}
     }
   }, [getAudioContext]);
 
@@ -37,9 +34,7 @@ export const useSharedAudio = () => {
       try {
         audioContextRef.current.close();
         audioContextRef.current = null;
-      } catch (error) {
-        console.error("Error closing audio context:", error);
-      }
+      } catch (error) {}
     }
   }, []);
 

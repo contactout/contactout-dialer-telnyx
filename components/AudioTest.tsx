@@ -51,9 +51,7 @@ const AudioTest: React.FC<AudioTestProps> = ({ onClose }) => {
       };
 
       updateAudioLevel();
-    } catch (error) {
-      console.error("Failed to start audio test:", error);
-    }
+    } catch (error) {}
   };
 
   const stopTest = () => {

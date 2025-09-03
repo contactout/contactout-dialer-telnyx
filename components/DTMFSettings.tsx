@@ -115,7 +115,6 @@ const DTMFSettings: React.FC<DTMFSettingsProps> = ({
             <button
               onClick={() => {
                 // This would test the current volume settings
-                console.log("Test tone at volume:", localVolume);
               }}
               className="inline-flex items-center px-4 py-2 bg-blue-500 hover:bg-blue-600 text-white text-sm font-medium rounded-lg transition-colors disabled:opacity-50 disabled:cursor-not-allowed"
               disabled={!localEnabled}

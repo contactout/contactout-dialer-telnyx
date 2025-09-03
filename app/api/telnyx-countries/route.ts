@@ -61,12 +61,6 @@ export async function GET(request: NextRequest) {
 
       const uniqueCountries = Array.from(new Set(countryCodes));
 
-      console.log(
-        "Server-side Telnyx countries fetch - Success:",
-        uniqueCountries.length,
-        "countries from CSV"
-      );
-
       return NextResponse.json({
         countries: uniqueCountries,
         source: "api_csv",
@@ -88,9 +82,6 @@ export async function GET(request: NextRequest) {
       "BR",
       "MX",
     ];
-    console.log(
-      "Server-side Telnyx countries fetch - Using fallback countries"
-    );
 
     return NextResponse.json({
       countries: fallbackCountries,
@@ -98,8 +89,6 @@ export async function GET(request: NextRequest) {
       message: "API call failed, using fallback countries",
     });
   } catch (error) {
-    console.error("Server-side Telnyx countries fetch - Error:", error);
-
     // Fallback to hardcoded countries on error
     const fallbackCountries = [
       "US",

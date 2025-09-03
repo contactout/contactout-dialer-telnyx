@@ -39,9 +39,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const [isAdmin, setIsAdmin] = useState(false);
 
   // Debug logging for admin status changes
-  useEffect(() => {
-    console.log("AuthContext - isAdmin state changed to:", isAdmin);
-  }, [isAdmin]);
+  useEffect(() => {}, [isAdmin]);
 
   const lastProcessedEventRef = useRef<string | null>(null);
   const subscriptionRef = useRef<any>(null);
@@ -64,15 +62,11 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     userId: string
   ): Promise<boolean> => {
     try {
-      console.log(`Checking access for user: ${email} (${userId})`);
-
       // Check if user is already an admin in our database
       try {
         const isAdmin = await DatabaseService.isUserAdmin(userId);
-        console.log(`Admin check result for ${userId}: ${isAdmin}`);
 
         if (isAdmin) {
-          console.log(`User ${userId} is admin, allowing access`);
           return true; // Admin users can always access
         }
       } catch (adminCheckError) {
@@ -98,9 +92,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   const checkAndCacheAdminStatus = useCallback(async (userId: string) => {
     try {
       const adminStatus = await DatabaseService.isUserAdmin(userId);
-      console.log(`Setting admin status to: ${adminStatus} for user ${userId}`);
       setIsAdmin(adminStatus);
-      console.log(`Admin status cached for user ${userId}: ${adminStatus}`);
       return adminStatus;
     } catch (error) {
       console.warn("Admin check failed:", error);

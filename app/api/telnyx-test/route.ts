@@ -28,12 +28,6 @@ export async function GET(request: NextRequest) {
       "User-Agent": "ContactOut-Dialer/1.0",
     };
 
-    console.log("Server-side Telnyx API test - Making request to:", testUrl);
-    console.log(
-      "Server-side Telnyx API test - API Key prefix:",
-      apiKey.substring(0, 15) + "..."
-    );
-
     const testResponse = await fetch(testUrl, {
       method: "GET",
       headers: testHeaders,
@@ -48,8 +42,6 @@ export async function GET(request: NextRequest) {
       contentType: testResponse.headers.get("content-type"),
     };
 
-    console.log("Server-side Telnyx API test - Response:", responseInfo);
-
     if (testResponse.ok) {
       // Check content type to handle different response formats
       const contentType = testResponse.headers.get("content-type") || "";
@@ -57,10 +49,6 @@ export async function GET(request: NextRequest) {
       if (contentType.includes("application/json")) {
         try {
           const responseData = await testResponse.json();
-          console.log(
-            "Server-side Telnyx API test - JSON Success:",
-            responseData
-          );
 
           return NextResponse.json({
             isConnected: true,
@@ -74,19 +62,13 @@ export async function GET(request: NextRequest) {
               responseFormat: "json",
             },
           });
-        } catch (jsonError) {
-          console.error("Failed to parse JSON response:", jsonError);
-        }
+        } catch (jsonError) {}
       } else if (
         contentType.includes("text/csv") ||
         contentType.includes("text/plain")
       ) {
         // Handle CSV or plain text responses
         const responseText = await testResponse.text();
-        console.log(
-          "Server-side Telnyx API test - Text/CSV Success (first 200 chars):",
-          responseText.substring(0, 200)
-        );
 
         return NextResponse.json({
           isConnected: true,
@@ -104,10 +86,6 @@ export async function GET(request: NextRequest) {
       } else {
         // Handle other response types
         const responseText = await testResponse.text();
-        console.log(
-          "Server-side Telnyx API test - Other format Success (first 200 chars):",
-          responseText.substring(0, 200)
-        );
 
         return NextResponse.json({
           isConnected: true,
@@ -140,8 +118,6 @@ export async function GET(request: NextRequest) {
         serverSide: true,
       };
 
-      console.error("Server-side Telnyx API test - Failed:", errorDetails);
-
       return NextResponse.json(
         {
           isConnected: false,
@@ -160,8 +136,6 @@ export async function GET(request: NextRequest) {
       timestamp: new Date().toISOString(),
       serverSide: true,
     };
-
-    console.error("Server-side Telnyx API test - Error:", errorDetails);
 
     return NextResponse.json(
       {

@@ -28,15 +28,12 @@ export const useDTMFTones = () => {
       if (context) {
         resumeAudioContext();
       }
-    } catch (error) {
-      console.error("Failed to initialize AudioContext:", error);
-    }
+    } catch (error) {}
   }, [getAudioContext, resumeAudioContext]);
 
   const playTone = useCallback(
     async (digit: string) => {
       if (!DTMF_FREQUENCIES[digit]) {
-        console.warn("Invalid digit for DTMF tone:", digit);
         return;
       }
 
@@ -100,7 +97,6 @@ export const useDTMFTones = () => {
           isPlayingRef.current = false;
         }, duration * 1000);
       } catch (error) {
-        console.error("Failed to play DTMF tone:", error);
         isPlayingRef.current = false;
       }
     },

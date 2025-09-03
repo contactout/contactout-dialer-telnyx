@@ -58,7 +58,6 @@ const CallCostHistory: React.FC<CallCostHistoryProps> = ({
       setCallCosts(data || []);
       calculateTotalCosts(data || []);
     } catch (err: any) {
-      console.error("Error fetching call costs:", err);
       setError(err.message || "Failed to fetch call costs");
     } finally {
       setLoading(false);
@@ -80,7 +79,6 @@ const CallCostHistory: React.FC<CallCostHistoryProps> = ({
 
       setUsers(usersMap);
     } catch (err: any) {
-      console.error("Error fetching users:", err);
       // Don't set error for users - we can still show call costs
     }
   }, []);
