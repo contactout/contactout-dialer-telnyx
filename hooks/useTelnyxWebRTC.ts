@@ -477,14 +477,27 @@ export const useTelnyxWebRTC = (
 
       // Get the actual phone number that was dialed
       // Use the stored dialed number to ensure we track the correct number
+      // Priority: phoneNumberOverride > call.dialedPhoneNumber > currentDialedNumber > call.phoneNumber > currentCall?.phoneNumber
       const phoneNumber =
         phoneNumberOverride ||
+        call?.dialedPhoneNumber ||
         currentDialedNumber ||
         call.phoneNumber ||
         currentCall?.phoneNumber;
 
-      // Call tracking to database
+      // Validate that we have a phone number
+      if (!phoneNumber) {
+        console.error("No phone number available for call tracking:", {
+          phoneNumberOverride,
+          callDialedPhoneNumber: call?.dialedPhoneNumber,
+          currentDialedNumber,
+          callPhoneNumber: call.phoneNumber,
+          currentCallPhoneNumber: currentCall?.phoneNumber,
+        });
+        return;
+      }
 
+      // Call tracking to database
       DatabaseService.trackCall({
         user_id: userId,
         phone_number: phoneNumber,
@@ -495,7 +508,7 @@ export const useTelnyxWebRTC = (
         console.error("DatabaseService.trackCall failed:", error);
       });
     },
-    [userId, config.phoneNumber, currentCall]
+    [userId, currentDialedNumber, currentCall]
   );
 
   const notifyCallStatus = useCallback(
@@ -639,24 +652,9 @@ export const useTelnyxWebRTC = (
               setCurrentCall(null);
               setCallControlId(null);
               setCallStartTime(null);
+              setCurrentDialedNumber(null);
 
               transitionCallState("idle", call);
-
-              // Log call to Supabase
-              trackCall(
-                call,
-                "failed",
-                Math.floor(callDuration),
-                currentDialedNumber || undefined
-              );
-
-              // Notify status
-              notifyCallStatus("failed", currentDialedNumber || undefined);
-
-              // Clean up call state immediately
-              setCurrentCall(null);
-              setCallControlId(null);
-              setCallStartTime(null);
               return;
             }
           }
@@ -747,6 +745,11 @@ export const useTelnyxWebRTC = (
       setCallControlId(call.id);
       setCallStartTime(Date.now());
       setCurrentDialedNumber(phoneNumber);
+
+      // Store the phone number in the call object to prevent race conditions
+      if (call) {
+        call.dialedPhoneNumber = phoneNumber;
+      }
 
       // Store call start time locally to avoid state update delays
       const localCallStartTime = Date.now();

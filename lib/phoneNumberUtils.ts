@@ -173,16 +173,32 @@ export function detectCountry(phoneNumber: string): CountryInfo | null {
       }
     }
   } else {
-    // Check for numbers that start with country codes (without +)
+    // For numbers without +, only check for explicit country codes that are commonly used
+    // without + prefix (like "1" for US/Canada)
+    if (cleaned.startsWith("1") && cleaned.length >= 10) {
+      // US/Canada numbers with explicit "1" prefix
+      return COUNTRY_CODES.US;
+    }
+
+    // For other international numbers without +, check for specific country codes
+    // but be more restrictive to avoid false positives
     for (const pattern of COUNTRY_CODE_PATTERNS) {
-      if (cleaned.startsWith(pattern.code)) {
+      if (pattern.code !== "1" && cleaned.startsWith(pattern.code)) {
+        // Check if the number length makes sense for this country
         const country = COUNTRY_CODES[pattern.countries[0]];
-        if (country) return country;
+        if (country) {
+          // For numbers without +, they should be long enough to be clearly international
+          // or match the expected length for that country
+          const expectedLength = country.minLength + pattern.code.length;
+          if (cleaned.length >= expectedLength) {
+            return country;
+          }
+        }
       }
     }
   }
 
-  // Default to US for numbers without country code
+  // Default to US for numbers without country code (like 5551234567)
   return COUNTRY_CODES.US;
 }
 
