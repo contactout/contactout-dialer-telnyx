@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { useCallAudio } from "@/hooks/useCallAudio";
+import { detectCountry, formatPhoneNumber } from "@/lib/phoneNumberUtils";
 
 interface CallingScreenProps {
   phoneNumber: string;
@@ -70,7 +71,9 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
     if (callState === "ringing") {
       playCallAudio("ringing");
     } else if (callState === "trying" || callState === "connecting") {
-      playCallAudio("connecting");
+      // For international calls, play ringing tone during "trying" state
+      // as they may not transition to "ringing" state
+      playCallAudio("ringing");
     }
 
     // Cleanup function
@@ -182,7 +185,22 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
 
         {/* Phone Number */}
         <div className="mb-6">
-          <div className="text-2xl font-mono text-gray-800">{phoneNumber}</div>
+          <div className="text-2xl font-mono text-gray-800 flex items-center justify-center space-x-2">
+            {/* Country Flag */}
+            {(() => {
+              const country = detectCountry(phoneNumber);
+              if (country) {
+                return (
+                  <span className="text-3xl" title={country.name}>
+                    {country.flag}
+                  </span>
+                );
+              }
+              return null;
+            })()}
+            {/* Formatted Phone Number */}
+            <span>{formatPhoneNumber(phoneNumber) || phoneNumber}</span>
+          </div>
         </div>
 
         {/* Status Text */}

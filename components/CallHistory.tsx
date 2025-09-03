@@ -8,6 +8,7 @@ import {
   PhoneMissed,
   PhoneIncoming,
 } from "lucide-react";
+import { detectCountry, formatPhoneNumber } from "@/lib/phoneNumberUtils";
 
 interface CallHistoryProps {
   callHistory: CallRecord[];
@@ -125,8 +126,27 @@ const CallHistory: React.FC<CallHistoryProps> = ({
 
                   {/* Phone Number and Details */}
                   <div className="flex-1 min-w-0">
-                    <div className="text-base font-medium text-gray-900 font-mono truncate">
-                      {call.phone_number}
+                    <div className="text-base font-medium text-gray-900 font-mono truncate flex items-center space-x-2">
+                      {/* Country Flag */}
+                      {(() => {
+                        const country = detectCountry(call.phone_number);
+                        if (country) {
+                          return (
+                            <span
+                              className="text-lg flex-shrink-0"
+                              title={country.name}
+                            >
+                              {country.flag}
+                            </span>
+                          );
+                        }
+                        return null;
+                      })()}
+                      {/* Formatted Phone Number */}
+                      <span className="truncate">
+                        {formatPhoneNumber(call.phone_number) ||
+                          call.phone_number}
+                      </span>
                     </div>
                     <div className="flex items-center space-x-3 text-sm text-gray-500 mt-1">
                       <span className="flex items-center">

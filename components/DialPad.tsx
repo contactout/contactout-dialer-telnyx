@@ -1,6 +1,11 @@
 import React, { useEffect, useCallback } from "react";
 import { Phone } from "lucide-react";
 import { useDTMFTones } from "@/hooks/useDTMFTones";
+import {
+  detectCountry,
+  formatPhoneNumber,
+  getCountryFlag,
+} from "@/lib/phoneNumberUtils";
 
 interface DialPadProps {
   phoneNumber: string;
@@ -76,7 +81,24 @@ const DialPad: React.FC<DialPadProps> = ({
       {/* Phone Number Display */}
       <div className="mb-6 p-4 bg-gradient-to-br from-gray-50 to-gray-100 rounded-2xl text-center border border-gray-200 shadow-sm">
         <div className="text-xl font-mono text-gray-800 min-h-[2rem] flex items-center justify-center">
-          {phoneNumber || (
+          {phoneNumber ? (
+            <div className="flex items-center space-x-2">
+              {/* Country Flag */}
+              {(() => {
+                const country = detectCountry(phoneNumber);
+                if (country) {
+                  return (
+                    <span className="text-2xl" title={country.name}>
+                      {country.flag}
+                    </span>
+                  );
+                }
+                return null;
+              })()}
+              {/* Formatted Phone Number */}
+              <span>{formatPhoneNumber(phoneNumber) || phoneNumber}</span>
+            </div>
+          ) : (
             <span className="text-gray-400 font-normal">Enter number</span>
           )}
         </div>

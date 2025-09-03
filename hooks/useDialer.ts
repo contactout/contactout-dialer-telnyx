@@ -476,14 +476,19 @@ export const useDialer = (telnyxActions: {
   ]);
 
   // Early failure detection for calls stuck in "trying" state
+  // Increased timeout for international calls which may take longer to connect
   useEffect(() => {
     if (telnyxActions.callState === "trying" && !telnyxActions.isCallActive) {
       const earlyFailureTimeout = setTimeout(() => {
-        // If call has been in "trying" state for more than 2 seconds, force failure
+        // If call has been in "trying" state for more than 5 seconds, force failure
+        // This gives international calls more time to connect
+        console.log(
+          "🚨 Early failure detection triggered - call stuck in trying state"
+        );
         setErrorMessageAction("Call failed - Number not reachable");
         setShowErrorPopup(true);
         telnyxActions.forceResetCallState();
-      }, 2000); // 2 seconds for early failure detection
+      }, 5000); // 5 seconds for early failure detection (increased from 2 seconds)
 
       return () => clearTimeout(earlyFailureTimeout);
     }

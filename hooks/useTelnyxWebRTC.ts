@@ -664,6 +664,8 @@ export const useTelnyxWebRTC = (
               break;
 
             case "trying":
+              // For international calls, "trying" state can persist longer
+              // Transition to dialing state but also set up timeout monitoring
               if (callState !== "dialing") {
                 transitionCallState("dialing", call);
               }
@@ -872,6 +874,12 @@ export const useTelnyxWebRTC = (
           (call.state === "connecting" || call.state === "trying") &&
           callDuration > 8
         ) {
+          console.log(
+            "🚨 Call timeout detected - logging failed call to Supabase"
+          );
+          // Log the call to Supabase before handling failure
+          trackCall(call, "failed", Math.floor(callDuration), phoneNumber);
+          notifyCallStatus("failed", phoneNumber);
           handleCallFailed(call, phoneNumber);
           clearInterval(callStateMonitor);
         }
