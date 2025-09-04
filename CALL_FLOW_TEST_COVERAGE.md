@@ -11,20 +11,25 @@ This document describes the comprehensive test coverage added to ensure the call
 **Purpose**: Ensure that normal answered calls are NOT incorrectly classified as voice mail.
 
 #### Test Cases:
+
 - ✅ **Normal answered calls should be classified as "connected"**
+
   - Tests calls without any voice mail indicators
   - Ensures short calls are not automatically classified as voice mail
   - Verifies `isCallActive` is set to `true` for normal calls
 
 - ✅ **Calls with Telnyx voice mail indicators should be classified as "voicemail"**
+
   - Tests `call.voice_mail_detected = true`
   - Verifies proper voicemail classification
 
 - ✅ **Calls with machine answer indicators should be classified as "voicemail"**
+
   - Tests `call.machine_answer = true`
   - Verifies machine detection works correctly
 
 - ✅ **Calls with voice mail headers should be classified as "voicemail"**
+
   - Tests `call.headers["X-Voice-Mail"] = "true"`
   - Tests `call.headers["X-Answer-Type"] = "machine"`
   - Verifies header-based detection
@@ -38,15 +43,19 @@ This document describes the comprehensive test coverage added to ensure the call
 **Purpose**: Ensure that successful calls are properly logged as "completed" rather than "failed".
 
 #### Test Cases:
+
 - ✅ **Successful calls should be marked as "completed" regardless of duration**
+
   - Tests that short but successful calls are not marked as failed
   - Verifies proper call completion logging
 
 - ✅ **Extremely short calls (< 1 second) should be marked as "failed"**
+
   - Tests immediate failure detection
   - Verifies proper error handling for invalid numbers
 
 - ✅ **Calls that never progress past dialing should be marked as "failed"**
+
   - Tests calls stuck in dialing state
   - Verifies proper failure classification
 
@@ -59,7 +68,9 @@ This document describes the comprehensive test coverage added to ensure the call
 **Purpose**: Ensure that the UI stays on the calling screen when calls are answered.
 
 #### Test Cases:
+
 - ✅ **Calling screen should be maintained when call is answered (CRITICAL FIX)**
+
   - Tests the original issue: UI should not redirect to dialpad
   - Verifies `isCallActive` is `true` and `isConnecting` is `false`
   - Ensures proper state transitions: `dialing` → `ringing` → `connected`
@@ -73,7 +84,9 @@ This document describes the comprehensive test coverage added to ensure the call
 **Purpose**: Ensure that successful calls are properly logged in call history.
 
 #### Test Cases:
+
 - ✅ **Successful calls should be logged as "completed"**
+
   - Tests that answered calls are logged with correct status
   - Verifies call history accuracy
 
@@ -86,7 +99,9 @@ This document describes the comprehensive test coverage added to ensure the call
 **Purpose**: Test the complete call flow from UI perspective.
 
 #### Test Cases:
+
 - ✅ **Multiple rapid calls should maintain proper flow**
+
   - Tests system stability under rapid call scenarios
   - Verifies no state corruption
 
@@ -97,16 +112,19 @@ This document describes the comprehensive test coverage added to ensure the call
 ## Test Implementation Details
 
 ### Mocking Strategy
+
 - **TelnyxRTC**: Mocked with proper call object structure
 - **Database Service**: Mocked to prevent actual database calls
 - **Phone Number Utils**: Mocked for consistent E.164 formatting
 
 ### Test Data
+
 - **Mock Config**: Standard Telnyx configuration for testing
 - **Mock Calls**: Various call states and properties for comprehensive testing
 - **Mock Phone Numbers**: Standard test numbers for consistent testing
 
 ### Assertions
+
 - **State Verification**: Ensures UI state matches expected Telnyx state
 - **Boolean Flags**: Verifies `isCallActive`, `isConnecting` flags
 - **Error Handling**: Tests proper error messages and state cleanup
@@ -115,6 +133,7 @@ This document describes the comprehensive test coverage added to ensure the call
 ## Critical Test Scenarios
 
 ### 1. Original Issue Prevention
+
 ```typescript
 it("should maintain calling screen UI when call is answered (CRITICAL FIX)", async () => {
   // This test specifically prevents the original issue from recurring
@@ -123,6 +142,7 @@ it("should maintain calling screen UI when call is answered (CRITICAL FIX)", asy
 ```
 
 ### 2. Voice Mail False Positive Prevention
+
 ```typescript
 it("should NOT classify normal answered calls as voice mail", async () => {
   // This test ensures the conservative voice mail detection approach works
@@ -131,6 +151,7 @@ it("should NOT classify normal answered calls as voice mail", async () => {
 ```
 
 ### 3. Call Logging Accuracy
+
 ```typescript
 it("should properly log successful calls in call history", async () => {
   // This test ensures successful calls are logged as "completed"
@@ -144,7 +165,8 @@ it("should properly log successful calls in call history", async () => {
 
 **Reason for Disabling**: The tests require complex mocking of the Telnyx WebRTC SDK and React hooks, which needs more sophisticated setup.
 
-**Next Steps**: 
+**Next Steps**:
+
 1. Implement proper mocking for Telnyx WebRTC SDK
 2. Set up React Testing Library with proper hook testing
 3. Re-enable tests in pre-commit hook
@@ -163,7 +185,7 @@ Even with tests temporarily disabled, the call flow is protected by:
 
 - **Total Test Cases**: 21
 - **Voice Mail Detection**: 5 tests
-- **Call Status Determination**: 4 tests  
+- **Call Status Determination**: 4 tests
 - **UI State Transitions**: 3 tests
 - **Call Logging**: 2 tests
 - **Integration Tests**: 4 tests
