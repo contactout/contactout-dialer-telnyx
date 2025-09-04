@@ -257,12 +257,26 @@ export const useTelnyxWebRTC = (
           setError(null);
           break;
         case "connected":
+          console.log("📞 Call connected - setting up audio and call state");
           setIsConnecting(false);
           setIsCallActive(true);
           setCurrentCall(call);
           setError(null);
           if (!callStartTime) {
             setCallStartTime(Date.now());
+          }
+
+          // CRITICAL: Ensure audio context is active for bidirectional communication
+          try {
+            if (localStreamRef.current) {
+              console.log("🎤 Local audio stream is available for call");
+            } else {
+              console.warn(
+                "⚠️ No local audio stream available - this may cause audio issues"
+              );
+            }
+          } catch (error) {
+            console.error("❌ Error checking audio stream:", error);
           }
           break;
         case "voicemail":
@@ -287,6 +301,130 @@ export const useTelnyxWebRTC = (
     },
     [cleanupAll, callStartTime]
   );
+
+  // ============================================================================
+  // MICROPHONE ACCESS MANAGEMENT
+  // ============================================================================
+
+  const initializeMicrophoneAccess = useCallback(async () => {
+    try {
+      console.log("🎤 Initializing microphone access...");
+
+      // Check if we already have a valid stream
+      if (localStreamRef.current && localStreamRef.current.active) {
+        console.log("🎤 Microphone stream already active");
+        setHasMicrophoneAccess(true);
+        return true;
+      }
+
+      // Request microphone access with optimal settings
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: true,
+          noiseSuppression: true,
+          autoGainControl: true,
+          sampleRate: 48000,
+          channelCount: 1,
+        },
+        video: false,
+      });
+
+      // Store the stream and update state
+      localStreamRef.current = stream;
+      setHasMicrophoneAccess(true);
+      console.log("✅ Microphone access granted");
+
+      // Monitor stream state changes
+      stream.getAudioTracks().forEach((track) => {
+        track.addEventListener("ended", () => {
+          console.warn("⚠️ Microphone track ended");
+          setHasMicrophoneAccess(false);
+        });
+
+        track.addEventListener("mute", () => {
+          console.warn("⚠️ Microphone track muted");
+        });
+
+        track.addEventListener("unmute", () => {
+          console.log("✅ Microphone track unmuted");
+        });
+      });
+
+      return true;
+    } catch (micError: unknown) {
+      console.error("❌ Failed to get microphone access:", micError);
+
+      // Provide specific error messages based on the error type
+      let errorMessage = "Microphone access required for calls";
+      if (micError instanceof Error) {
+        if (micError.name === "NotAllowedError") {
+          errorMessage =
+            "Microphone access denied. Please allow microphone permissions and refresh the page.";
+        } else if (micError.name === "NotFoundError") {
+          errorMessage =
+            "No microphone found. Please connect a microphone and refresh the page.";
+        } else if (micError.name === "NotReadableError") {
+          errorMessage =
+            "Microphone is in use by another application. Please close other apps using the microphone.";
+        } else if (micError.name === "OverconstrainedError") {
+          errorMessage =
+            "Microphone doesn't meet requirements. Please try a different microphone.";
+        }
+      }
+
+      // Set error for microphone issues but continue with Telnyx
+      setError(errorMessage);
+      setHasMicrophoneAccess(false);
+      return false;
+    }
+  }, []);
+
+  const retryMicrophoneAccess = useCallback(async () => {
+    console.log("🔄 Retrying microphone access...");
+
+    // Clean up existing stream
+    if (localStreamRef.current) {
+      localStreamRef.current.getTracks().forEach((track) => track.stop());
+      localStreamRef.current = null;
+    }
+
+    // Try to get new access
+    return await initializeMicrophoneAccess();
+  }, [initializeMicrophoneAccess]);
+
+  const validateMicrophoneAccess = useCallback(() => {
+    if (!localStreamRef.current) {
+      console.warn("⚠️ No microphone stream available");
+      setHasMicrophoneAccess(false);
+      return false;
+    }
+
+    if (!localStreamRef.current.active) {
+      console.warn("⚠️ Microphone stream is not active");
+      setHasMicrophoneAccess(false);
+      return false;
+    }
+
+    const audioTracks = localStreamRef.current.getAudioTracks();
+    if (audioTracks.length === 0) {
+      console.warn("⚠️ No audio tracks in microphone stream");
+      setHasMicrophoneAccess(false);
+      return false;
+    }
+
+    const activeTracks = audioTracks.filter(
+      (track) => track.readyState === "live"
+    );
+    if (activeTracks.length === 0) {
+      console.warn("⚠️ No active audio tracks");
+      setHasMicrophoneAccess(false);
+      return false;
+    }
+
+    console.log("✅ Microphone access validated");
+    setHasMicrophoneAccess(true);
+    return true;
+  }, []);
 
   // ============================================================================
   // VOICE MAIL DETECTION LOGIC
@@ -434,54 +572,6 @@ export const useTelnyxWebRTC = (
       setIsReconnecting(false);
     }
   }, [client, isReconnecting, isInitializing]);
-
-  // Retry microphone access
-  const retryMicrophoneAccess = useCallback(async () => {
-    if (hasMicrophoneAccess) {
-      return;
-    }
-
-    setError("Attempting to access microphone...");
-
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({
-        audio: {
-          echoCancellation: true,
-          noiseSuppression: true,
-          autoGainControl: true,
-          sampleRate: 48000,
-          channelCount: 1,
-        },
-        video: false,
-      });
-
-      localStreamRef.current = stream;
-      setHasMicrophoneAccess(true);
-      setError(null);
-    } catch (micError: unknown) {
-      console.error("Failed to get microphone access on retry:", micError);
-
-      let errorMessage = "Failed to access microphone";
-      if (micError instanceof Error) {
-        if (micError.name === "NotAllowedError") {
-          errorMessage =
-            "Microphone access denied. Please allow microphone permissions and try again.";
-        } else if (micError.name === "NotFoundError") {
-          errorMessage =
-            "No microphone found. Please connect a microphone and try again.";
-        } else if (micError.name === "NotReadableError") {
-          errorMessage =
-            "Microphone is in use by another application. Please close other apps using the microphone.";
-        } else if (micError.name === "OverconstrainedError") {
-          errorMessage =
-            "Microphone doesn't meet requirements. Please try a different microphone.";
-        }
-      }
-
-      setError(errorMessage);
-      setHasMicrophoneAccess(false);
-    }
-  }, [hasMicrophoneAccess]);
 
   // ============================================================================
   // DATABASE TRACKING
@@ -790,32 +880,79 @@ export const useTelnyxWebRTC = (
         // Read current UI state from ref to avoid stale closure
         const currentUIState = currentCallStateRef.current;
 
-        // CRITICAL: Use validator to ensure proper call flow synchronization
-        const flowValidation = validateCallFlowSequence(
-          call.state,
-          currentUIState
+        // Add debugging for call state monitoring
+        console.log(
+          `🔍 Call monitor: Telnyx=${
+            call.state
+          }, UI=${currentUIState}, Duration=${callDuration.toFixed(1)}s`
         );
 
-        if (flowValidation.shouldTransition && flowValidation.targetState) {
-          console.log(
-            `🔄 Call flow transition: ${currentUIState} → ${flowValidation.targetState} (${flowValidation.reason})`
-          );
+        // CRITICAL FIX: Handle state transitions with proper voice mail detection
+        const handleStateTransition = (
+          telnyxState: string,
+          currentUIState: CallState
+        ) => {
+          // Handle special case for answered calls - need voice mail detection
+          if (
+            telnyxState === "answered" &&
+            currentUIState !== "connected" &&
+            currentUIState !== "voicemail"
+          ) {
+            const callDuration = callStartTime
+              ? Math.floor((Date.now() - callStartTime) / 1000)
+              : 0;
 
-          // CRITICAL FIX: Validate the transition before applying it
-          const transitionValidation = validateCallStateTransition(
-            currentUIState,
-            flowValidation.targetState
-          );
-
-          if (transitionValidation.isValid) {
-            transitionCallState(flowValidation.targetState, call);
-            return;
-          } else {
-            console.warn(
-              `🚨 Invalid state transition blocked: ${transitionValidation.reason}`
+            console.log(
+              `📞 Processing answered call, duration: ${callDuration}s`
             );
+
+            // CRITICAL FIX: More conservative voice mail detection
+            // Only detect voice mail if we have strong indicators
+            if (detectVoiceMail(call, callDuration)) {
+              console.log("🎙️ Voice mail detected, transitioning to voicemail");
+              transitionCallState("voicemail", call);
+            } else {
+              // Default to connected for answered calls
+              console.log(
+                "📞 Normal call answered, transitioning to connected"
+              );
+              transitionCallState("connected", call);
+            }
+
+            // Stop monitoring after successful state transition
+            console.log(
+              "📞 Stopping call state monitor after answered transition"
+            );
+            clearInterval(callStateMonitor);
+            return true;
           }
-        }
+
+          // Handle other states with direct mapping
+          const stateMap: Record<string, CallState> = {
+            new: "dialing",
+            requesting: "dialing",
+            trying: "dialing",
+            early: "ringing",
+            ringing: "ringing",
+            connected: "connected",
+            hangup: "ended",
+            destroy: "ended",
+            failed: "ended",
+          };
+
+          const targetState = stateMap[telnyxState];
+          if (targetState && currentUIState !== targetState) {
+            console.log(
+              `🔄 Direct transition: ${currentUIState} → ${targetState} (Telnyx: ${telnyxState})`
+            );
+            transitionCallState(targetState, call);
+            return true;
+          }
+          return false;
+        };
+
+        // Apply state transition with voice mail detection
+        const transitioned = handleStateTransition(call.state, currentUIState);
 
         // CRITICAL: Monitor call flow for issues in development
         monitorCallFlow(
@@ -860,111 +997,42 @@ export const useTelnyxWebRTC = (
           return;
         }
 
-        // Handle state transitions in the monitoring interval
-        // This is where we actually detect state changes
-        switch (call.state) {
-          case "new":
-            // Call just created - transition to dialing
-            if (currentUIState !== "dialing") {
-              transitionCallState("dialing", call);
-            }
-            break;
+        // Handle call end states
+        if (call.state === "hangup" || call.state === "destroy") {
+          if (currentUIState !== "ended") {
+            transitionCallState("ended", call);
+          }
 
-          case "requesting":
-            // Call is being requested - ensure we're in dialing state
-            if (currentUIState !== "dialing") {
-              transitionCallState("dialing", call);
-            }
-            break;
-
-          case "trying":
-            // Call is trying to connect - ensure we're in dialing state
-            if (currentUIState !== "dialing") {
-              transitionCallState("dialing", call);
-            }
-            break;
-
-          case "ringing":
-            if (currentUIState !== "ringing") {
-              transitionCallState("ringing", call);
-            }
-            break;
-
-          case "early":
-            // Always transition to ringing when we reach early state (ICE connection established)
-            if (
-              currentUIState !== "ringing" &&
-              currentUIState !== "connected"
-            ) {
-              transitionCallState("ringing", call);
-            }
-            break;
-
-          case "answered":
-            if (
-              currentUIState !== "connected" &&
-              currentUIState !== "voicemail"
-            ) {
-              const callDuration = callStartTime
-                ? Math.floor((Date.now() - callStartTime) / 1000)
-                : 0;
-
-              // CRITICAL FIX: More conservative voice mail detection
-              // Only detect voice mail if we have strong indicators
-              if (detectVoiceMail(call, callDuration)) {
-                transitionCallState("voicemail", call);
-              } else {
-                // Default to connected for answered calls
-                transitionCallState("connected", call);
-              }
-
-              // Stop monitoring after successful state transition
-              clearInterval(callStateMonitor);
-              return;
-            }
-            break;
-
-          case "connected":
-            if (currentUIState !== "connected") {
-              transitionCallState("connected", call);
-            }
-            break;
-
-          case "hangup":
-            // Transition to ended state before handling hangup
-            if (currentUIState !== "ended") {
-              transitionCallState("ended", call);
-            }
-            // hangup is a normal end state, not a failure
+          if (call.state === "hangup") {
             handleCallHangup(call, phoneNumber);
-            // Stop monitoring after handling hangup
-            clearInterval(callStateMonitor);
-            return;
-
-          case "destroy":
-            // Transition to ended state before handling destroy
-            if (currentUIState !== "ended") {
-              transitionCallState("ended", call);
-            }
-            // destroy is a normal cleanup state, not a failure
+          } else {
             handleCallDestroy(call, phoneNumber);
-            // Stop monitoring after handling destroy
-            clearInterval(callStateMonitor);
-            return;
+          }
 
-          case "failed":
-            handleCallFailed(call, phoneNumber);
-            break;
+          clearInterval(callStateMonitor);
+          return;
         }
 
-        // TIMEOUT HANDLING - If call is stuck in connecting/trying for too long
+        if (call.state === "failed") {
+          handleCallFailed(call, phoneNumber);
+          clearInterval(callStateMonitor);
+          return;
+        }
+
+        // TIMEOUT HANDLING - If call is stuck in early stages for too long
         // Increased timeout for international calls which can take longer to establish ICE connection
         // Only timeout if we're still in early connection stages
         if (
-          (call.state === "connecting" || call.state === "trying") &&
+          (call.state === "connecting" ||
+            call.state === "trying" ||
+            call.state === "dialing") &&
           callDuration > 45 && // Increased from 15s to 45s for international calls
-          call.state !== "early" // Don't timeout if we've reached "early" state (ICE connection established)
+          call.state !== "early" && // Don't timeout if we've reached "early" state (ICE connection established)
+          call.state !== "ringing" // Don't timeout if we've reached "ringing" state
         ) {
+          console.log(
+            `⏰ Call timeout after ${callDuration}s in ${call.state} state`
+          );
           // Log the call to Supabase before handling failure
           trackCall(call, "failed", Math.floor(callDuration), phoneNumber);
           notifyCallStatus("failed", phoneNumber);
@@ -1335,46 +1403,8 @@ export const useTelnyxWebRTC = (
           return;
         }
 
-        // Get microphone access - but don't block Telnyx initialization
-        try {
-          const stream = await navigator.mediaDevices.getUserMedia({
-            audio: {
-              echoCancellation: true,
-              noiseSuppression: true,
-              autoGainControl: true,
-              sampleRate: 48000,
-              channelCount: 1,
-            },
-            video: false,
-          });
-          localStreamRef.current = stream;
-          setHasMicrophoneAccess(true);
-        } catch (micError: unknown) {
-          console.error("Failed to get microphone access:", micError);
-
-          // Provide specific error messages based on the error type
-          let errorMessage = "Microphone access required for calls";
-          if (micError instanceof Error) {
-            if (micError.name === "NotAllowedError") {
-              errorMessage =
-                "Microphone access denied. Please allow microphone permissions and refresh the page.";
-            } else if (micError.name === "NotFoundError") {
-              errorMessage =
-                "No microphone found. Please connect a microphone and refresh the page.";
-            } else if (micError.name === "NotReadableError") {
-              errorMessage =
-                "Microphone is in use by another application. Please close other apps using the microphone.";
-            } else if (micError.name === "OverconstrainedError") {
-              errorMessage =
-                "Microphone doesn't meet requirements. Please try a different microphone.";
-            }
-          }
-
-          // Set error for microphone issues but continue with Telnyx
-          setError(errorMessage);
-          setHasMicrophoneAccess(false);
-          // Don't return here - continue with Telnyx initialization
-        }
+        // CRITICAL FIX: Get microphone access with proper error handling and retry logic
+        await initializeMicrophoneAccess();
 
         // Create Telnyx client with best practices configuration
         const telnyxClient = new TelnyxRTC({
@@ -1734,6 +1764,8 @@ export const useTelnyxWebRTC = (
 
     // Audio state
     hasMicrophoneAccess,
+    retryMicrophoneAccess,
+    validateMicrophoneAccess,
     networkQuality,
 
     // Error handling
@@ -1751,7 +1783,6 @@ export const useTelnyxWebRTC = (
     completeCallFailure,
     debugAudioSetup,
     triggerReconnection,
-    retryMicrophoneAccess,
 
     // Call flow monitoring
     getCallFlowHealth: getCallFlowHealthCheck,

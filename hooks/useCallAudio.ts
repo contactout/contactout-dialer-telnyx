@@ -29,20 +29,33 @@ export const useCallAudio = (
     ringtoneStyle: "modern",
   }
 ) => {
-  const { getAudioContext, resumeAudioContext } = useSharedAudio();
+  const {
+    getAudioContext,
+    resumeAudioContext,
+    ensureAudioContextActive,
+    isAudioContextActive,
+  } = useSharedAudio();
   const ringtoneIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const busyToneIntervalRef = useRef<NodeJS.Timeout | null>(null);
   const errorToneIntervalRef = useRef<NodeJS.Timeout | null>(null);
 
-  // Initialize audio context
-  const initializeAudioContext = useCallback(() => {
+  // Initialize audio context with proper error handling
+  const initializeAudioContext = useCallback(async () => {
     try {
       const context = getAudioContext();
       if (context) {
-        resumeAudioContext();
+        const isActive = await ensureAudioContextActive();
+        if (!isActive) {
+          console.warn("⚠️ Audio context could not be activated");
+        }
+        return isActive;
       }
-    } catch (error) {}
-  }, [getAudioContext, resumeAudioContext]);
+      return false;
+    } catch (error) {
+      console.error("❌ Failed to initialize audio context:", error);
+      return false;
+    }
+  }, [getAudioContext, ensureAudioContextActive]);
 
   // Cleanup all audio
   const cleanupAudio = useCallback(() => {
@@ -282,9 +295,21 @@ export const useCallAudio = (
   }, [config.enabled, config.statusVolume]);
 
   // Call connected sound (when call is answered)
-  const playCallConnectedSound = useCallback(() => {
+  const playCallConnectedSound = useCallback(async () => {
+    if (!config.enabled) return;
+
     const audioContext = getAudioContext();
-    if (!audioContext || !config.enabled) return;
+    if (!audioContext) {
+      console.warn("⚠️ No audio context available for connected sound");
+      return;
+    }
+
+    // Ensure audio context is active before playing
+    const isActive = await ensureAudioContextActive();
+    if (!isActive) {
+      console.warn("⚠️ Audio context not active, cannot play connected sound");
+      return;
+    }
 
     try {
       const now = audioContext.currentTime;

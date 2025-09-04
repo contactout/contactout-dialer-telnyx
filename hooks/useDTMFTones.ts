@@ -17,8 +17,11 @@ const DTMF_FREQUENCIES: { [key: string]: [number, number] } = {
 };
 
 export const useDTMFTones = () => {
-  const { getAudioContext, resumeAudioContext } = useSharedAudio();
+  const { getAudioContext, resumeAudioContext, ensureAudioContextActive } =
+    useSharedAudio();
   const isPlayingRef = useRef(false);
+  const toneQueueRef = useRef<string[]>([]);
+  const isProcessingQueueRef = useRef(false);
   const [volume, setVolume] = useState(0.4); // Default volume at 40% for better audibility
   const [enabled, setEnabled] = useState(true); // Default enabled
 
@@ -31,26 +34,72 @@ export const useDTMFTones = () => {
     } catch (error) {}
   }, [getAudioContext, resumeAudioContext]);
 
+  // Process DTMF tone queue to prevent overlaps
+  const processToneQueue = useCallback(async () => {
+    if (isProcessingQueueRef.current || toneQueueRef.current.length === 0) {
+      return;
+    }
+
+    isProcessingQueueRef.current = true;
+
+    while (toneQueueRef.current.length > 0) {
+      const digit = toneQueueRef.current.shift();
+      if (digit) {
+        await playToneInternal(digit);
+        // Wait for tone to complete before playing next
+        await new Promise((resolve) => setTimeout(resolve, 120));
+      }
+    }
+
+    isProcessingQueueRef.current = false;
+  }, []);
+
   const playTone = useCallback(
     async (digit: string) => {
       if (!DTMF_FREQUENCIES[digit]) {
-        return;
-      }
-
-      if (isPlayingRef.current) {
+        console.warn(`⚠️ Invalid DTMF digit: ${digit}`);
         return;
       }
 
       if (!enabled) {
+        console.log(`🔇 DTMF disabled, ignoring digit: ${digit}`);
+        return;
+      }
+
+      // Add to queue instead of playing immediately
+      toneQueueRef.current.push(digit);
+      console.log(
+        `📞 DTMF digit queued: ${digit}, queue length: ${toneQueueRef.current.length}`
+      );
+
+      // Process queue if not already processing
+      if (!isProcessingQueueRef.current) {
+        processToneQueue();
+      }
+    },
+    [enabled, processToneQueue]
+  );
+
+  const playToneInternal = useCallback(
+    async (digit: string) => {
+      if (isPlayingRef.current) {
+        console.warn(`⚠️ DTMF tone already playing, skipping: ${digit}`);
         return;
       }
 
       try {
         const audioContext = getAudioContext();
-        if (!audioContext) return;
+        if (!audioContext) {
+          console.warn("⚠️ No audio context available for DTMF tone");
+          return;
+        }
 
-        // Resume audio context if it's suspended (browser requirement)
-        await resumeAudioContext();
+        // Ensure audio context is active
+        const isActive = await ensureAudioContextActive();
+        if (!isActive) {
+          console.warn("⚠️ Audio context not active, cannot play DTMF tone");
+          return;
+        }
 
         const frequencies = DTMF_FREQUENCIES[digit];
 
@@ -114,10 +163,28 @@ export const useDTMFTones = () => {
     setEnabled((prev) => !prev);
   }, []);
 
-  // Cleanup function to properly dispose of audio context
-  const cleanup = useCallback(() => {
-    // Cleanup is handled by the shared audio context
+  // Clear DTMF tone queue
+  const clearToneQueue = useCallback(() => {
+    toneQueueRef.current = [];
+    isProcessingQueueRef.current = false;
+    console.log("🧹 DTMF tone queue cleared");
   }, []);
+
+  // Get current queue status
+  const getQueueStatus = useCallback(() => {
+    return {
+      queueLength: toneQueueRef.current.length,
+      isProcessing: isProcessingQueueRef.current,
+      isPlaying: isPlayingRef.current,
+    };
+  }, []);
+
+  // Cleanup function to properly dispose of audio context and clear queue
+  const cleanup = useCallback(() => {
+    clearToneQueue();
+    isPlayingRef.current = false;
+    // Cleanup is handled by the shared audio context
+  }, [clearToneQueue]);
 
   // Test function to verify DTMF tones are working
   const testDTMFTone = useCallback(() => {
@@ -128,6 +195,8 @@ export const useDTMFTones = () => {
 
   return {
     playTone,
+    clearToneQueue,
+    getQueueStatus,
     cleanup,
     volume,
     updateVolume,

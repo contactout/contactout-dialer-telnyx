@@ -84,7 +84,10 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
 
   // Play call connected sound when call becomes active
   useEffect(() => {
-    if (isCallActive && callState === "answered") {
+    if (isCallActive && callState === "connected") {
+      console.log(
+        "📞 CallingScreen: Call is active and connected, playing connected sound"
+      );
       // Small delay to ensure smooth transition
       const timer = setTimeout(() => {
         playCallAudio("connected");

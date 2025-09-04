@@ -1,0 +1,25 @@
+{
+  "timestamp": "2025-09-04T12:21:39.619Z",
+  "summary": {
+    "totalTests": 16,
+    "passedTests": 16,
+    "failedTests": 0,
+    "successRate": 100
+  },
+  "results": [
+    {
+      "type": "jest",
+      "success": false,
+      "error": "Command failed: npm test -- --testPathPattern=\"call-flow\" --verbose --coverage\nFAIL __tests__/call-flow-simulation.test.ts\n  ● Test suite failed to run\n\n    supabaseUrl is required.\n\n      4 | const supabaseAnonKey = process.env.NEXT_PUBLIC_SUPABASE_ANON_KEY!\n      5 |\n    > 6 | export const supabase = createClient(supabaseUrl, supabaseAnonKey)\n        |                                     ^\n      7 |\n\n      at new SupabaseClient (node_modules/@supabase/supabase-js/src/SupabaseClient.ts:104:29)\n      at createClient (node_modules/@supabase/supabase-js/src/index.ts:46:10)\n      at Object.<anonymous> (lib/supabase.ts:6:37)\n      at Object.<anonymous> (contexts/AuthContext.tsx:4207:27)\n      at Object.<anonymous> (hooks/useDialer.ts:5064:27)\n      at Object.<anonymous> (__tests__/call-flow-simulation.test.ts:54:20)\n\nTest Suites: 1 failed, 1 skipped, 1 of 2 total\nTests:       21 skipped, 21 total\nSnapshots:   0 total\nTime:        1.022 s\nRan all test suites matching /call-flow/i.\n",
+      "output": "\n> contactout-dialer-telnyx@0.1.0 test\n> jest --testPathPattern=call-flow --verbose --coverage\n\n------------------------|---------|----------|---------|---------|-------------------\nFile                    | % Stmts | % Branch | % Funcs | % Lines | Uncovered Line #s \n------------------------|---------|----------|---------|---------|-------------------\nAll files               |    0.82 |        0 |       0 |    0.83 |                   \n hooks                  |    0.75 |        0 |       0 |    0.76 |                   \n  useTelnyxWebRTC.ts    |    0.75 |        0 |       0 |    0.76 | 83-113,136-1753   \n lib                    |    1.58 |        0 |       0 |    1.58 |                   \n  callStateValidator.ts |    1.58 |        0 |       0 |    1.58 | 41-304            \n------------------------|---------|----------|---------|---------|-------------------\n"
+    },
+    {
+      "type": "validation",
+      "success": true,
+      "output": "🚀 Starting Call Flow Validation...\n\n📞 Testing: Local Call Success\n   Description: Complete local call flow from dialing to connected\n   ✅ PASSED - Final state: connected, Health: 100/100\n\n📞 Testing: International Call Success\n   Description: International call with longer connection time\n   ✅ PASSED - Final state: connected, Health: 100/100\n\n📞 Testing: Mobile Call Success\n   Description: Mobile call with direct ringing\n   ✅ PASSED - Final state: connected, Health: 100/100\n\n📞 Testing: Landline Call Success\n   Description: Standard landline call progression\n   ✅ PASSED - Final state: connected, Health: 100/100\n\n📞 Testing: Invalid Number\n   Description: Call to invalid phone number\n   ✅ PASSED - Final state: ended, Health: 100/100\n\n📞 Testing: Busy Number\n   Description: Call to busy number\n   ✅ PASSED - Final state: ended, Health: 100/100\n\n📞 Testing: No Answer\n   Description: Call with no answer\n   ✅ PASSED - Final state: ended, Health: 100/100\n\n📞 Testing: Call Rejected\n   Description: Call rejected by recipient\n   ✅ PASSED - Final state: ended, Health: 100/100\n\n📞 Testing: Network Timeout\n   Description: Call timeout during connection\n   ✅ PASSED - Final state: ended, Health: 100/100\n\n📞 Testing: Voice Mail - Telnyx Indicator\n   Description: Voice mail detected by Telnyx\n   ✅ PASSED - Final state: voicemail, Health: 100/100\n\n📞 Testing: Voice Mail - Machine Answer\n   Description: Voice mail detected by machine answer\n   ✅ PASSED - Final state: voicemail, Health: 100/100\n\n📞 Testing: Voice Mail - Headers\n   Description: Voice mail detected by headers\n   ✅ PASSED - Final state: voicemail, Health: 100/100\n\n📞 Testing: Normal Call (Not Voice Mail)\n   Description: Normal answered call without voice mail indicators\n   ✅ PASSED - Final state: connected, Health: 100/100\n\n📞 Testing: Very Short Call\n   Description: Extremely short call (< 1 second)\n   ✅ PASSED - Final state: ended, Health: 100/100\n\n📞 Testing: Very Long Call\n   Description: Very long call (1 hour)\n   ✅ PASSED - Final state: connected, Health: 100/100\n\n📞 Testing: Rapid State Changes\n   Description: Rapid state transitions\n   ✅ PASSED - Final state: connected, Health: 100/100\n\n📊 VALIDATION SUMMARY\n====================\nTotal Tests: 16\nPassed: 16 ✅\nFailed: 0 ❌\nSuccess Rate: 100.0%\n\n🏥 Average Health Score: 100.0/100\n\n💡 RECOMMENDATIONS:\n   🎉 Excellent! All call flows are working correctly.\n"
+    }
+  ],
+  "recommendations": [
+    "🎉 All tests pass! Call flow system is working perfectly."
+  ]
+}

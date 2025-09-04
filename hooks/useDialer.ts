@@ -249,13 +249,7 @@ export const useDialer = (telnyxActions: {
         setPhoneNumber(phoneNumber + digit);
       }
     },
-    [
-      phoneNumber,
-      telnyxActions.isCallActive,
-      telnyxActions.sendDTMF,
-      setPhoneNumber,
-      telnyxActions,
-    ]
+    [phoneNumber, setPhoneNumber, telnyxActions]
   );
 
   const handleBackspace = useCallback(() => {
@@ -461,15 +455,33 @@ export const useDialer = (telnyxActions: {
   // Safety timeout to prevent calling screen from getting stuck indefinitely
   useEffect(() => {
     if (telnyxActions.isConnecting && !telnyxActions.isCallActive) {
-      const safetyTimeout = setTimeout(() => {
-        telnyxActions.forceResetCallState();
-      }, 10000); // 10 seconds safety timeout for international calls
+      // CRITICAL FIX: Don't timeout if we're in ringing state (call is progressing normally)
+      // Only timeout if we're stuck in dialing/trying states
+      if (
+        telnyxActions.callState === "ringing" ||
+        telnyxActions.callState === "early"
+      ) {
+        console.log("🔔 Call is ringing, not applying safety timeout");
+        return;
+      }
 
-      return () => clearTimeout(safetyTimeout);
+      console.log(
+        `⏰ Safety timeout started for call state: ${telnyxActions.callState}`
+      );
+      const safetyTimeout = setTimeout(() => {
+        console.log("⏰ Safety timeout triggered - forcing call reset");
+        telnyxActions.forceResetCallState();
+      }, 15000); // Increased to 15 seconds for international calls
+
+      return () => {
+        console.log("⏰ Safety timeout cleared");
+        clearTimeout(safetyTimeout);
+      };
     }
   }, [
     telnyxActions.isConnecting,
     telnyxActions.isCallActive,
+    telnyxActions.callState,
     telnyxActions.forceResetCallState,
     telnyxActions,
   ]);
@@ -502,6 +514,50 @@ export const useDialer = (telnyxActions: {
     showError,
     telnyxActions,
   ]);
+
+  // CRITICAL FIX: Add error recovery mechanisms
+  const attemptErrorRecovery = useCallback(async () => {
+    console.log("🔄 Attempting error recovery...");
+
+    try {
+      // Check if we can retry microphone access
+      if (telnyxActions.retryMicrophoneAccess) {
+        await telnyxActions.retryMicrophoneAccess();
+        console.log("✅ Microphone access retry attempted");
+        return true;
+      }
+
+      // Check if we can validate current state
+      if (telnyxActions.hasMicrophoneAccess) {
+        console.log("✅ Microphone access is available");
+        return true;
+      }
+
+      // If we're in a stuck state, try to reset
+      if (telnyxActions.isConnecting && !telnyxActions.isCallActive) {
+        console.log("🔄 Resetting stuck call state");
+        telnyxActions.forceResetCallState();
+        return true;
+      }
+
+      return false;
+    } catch (error) {
+      console.error("❌ Error recovery failed:", error);
+      return false;
+    }
+  }, [telnyxActions]);
+
+  // Auto-recovery for common error states
+  useEffect(() => {
+    if (telnyxActions.error && !telnyxActions.isCallActive) {
+      // Wait a bit before attempting recovery to avoid rapid retries
+      const recoveryTimeout = setTimeout(() => {
+        attemptErrorRecovery();
+      }, 2000);
+
+      return () => clearTimeout(recoveryTimeout);
+    }
+  }, [telnyxActions.error, telnyxActions.isCallActive, attemptErrorRecovery]);
 
   // Voice mail detection and handling
   useEffect(() => {
@@ -547,5 +603,11 @@ export const useDialer = (telnyxActions: {
     };
   }, [callStartTime, telnyxActions.isCallActive, setCallDurationAction]);
 
-  return [state, actions, logic];
+  // Add error recovery to actions
+  const enhancedActions = {
+    ...actions,
+    attemptErrorRecovery,
+  };
+
+  return [state, enhancedActions, logic];
 };
