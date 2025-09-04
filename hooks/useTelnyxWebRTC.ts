@@ -935,6 +935,7 @@ export const useTelnyxWebRTC = (
             early: "ringing",
             ringing: "ringing",
             connected: "connected",
+            active: "connected", // CRITICAL FIX: active state means call is connected
             hangup: "ended",
             destroy: "ended",
             failed: "ended",
@@ -1042,7 +1043,11 @@ export const useTelnyxWebRTC = (
 
         // CLEANUP MONITORING - Only stop monitoring after we've handled the state transition
         // Don't stop monitoring for hangup/destroy - let the switch statement handle them first
-        if (call.state === "connected" || call.state === "failed") {
+        if (
+          call.state === "connected" ||
+          call.state === "active" ||
+          call.state === "failed"
+        ) {
           clearInterval(callStateMonitor);
           return; // Exit the monitor loop
         }

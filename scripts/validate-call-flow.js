@@ -19,6 +19,7 @@ const validateCallFlowSequence = (telnyxState, currentUIState) => {
     ringing: "ringing",
     answered: "connected",
     connected: "connected",
+    active: "connected", // CRITICAL FIX: active state means call is connected
     hangup: "ended",
     destroy: "ended",
     failed: "ended",
@@ -323,6 +324,14 @@ const testScenarios = [
     callDuration: 1,
     shouldSucceed: true,
     rapidTransitions: true,
+  },
+  {
+    name: "Active State Transition",
+    description: "Call that transitions to active state (connected)",
+    telnyxStates: ["new", "requesting", "trying", "early", "active"],
+    expectedUIStates: ["dialing", "dialing", "dialing", "ringing", "connected"],
+    callDuration: 5,
+    shouldSucceed: true,
   },
 ];
 
