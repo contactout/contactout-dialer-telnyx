@@ -4,6 +4,7 @@ import { DatabaseService } from "@/lib/database";
 import {
   validateCallFlowSequence,
   validateRingingStateTransition,
+  validateCallStateTransition,
   monitorCallFlow,
   getCallFlowHealth,
   type CallState,
@@ -342,7 +343,7 @@ export const useTelnyxWebRTC = (
 
         // CRITICAL FIX: Require much higher confidence to avoid false positives
         // Normal calls should NOT be classified as voice mail
-        const isVoiceMail = confidence >= 6; // Increased threshold from 3 to 6
+        const isVoiceMail = confidence >= 8; // Increased threshold from 6 to 8 for even more conservative detection
 
         // Log voice mail detection in development for debugging
         if (process.env.NODE_ENV === "development" && confidence > 0) {
@@ -799,8 +800,21 @@ export const useTelnyxWebRTC = (
           console.log(
             `🔄 Call flow transition: ${currentUIState} → ${flowValidation.targetState} (${flowValidation.reason})`
           );
-          transitionCallState(flowValidation.targetState, call);
-          return;
+
+          // CRITICAL FIX: Validate the transition before applying it
+          const transitionValidation = validateCallStateTransition(
+            currentUIState,
+            flowValidation.targetState
+          );
+
+          if (transitionValidation.isValid) {
+            transitionCallState(flowValidation.targetState, call);
+            return;
+          } else {
+            console.warn(
+              `🚨 Invalid state transition blocked: ${transitionValidation.reason}`
+            );
+          }
         }
 
         // CRITICAL: Monitor call flow for issues in development
@@ -895,11 +909,18 @@ export const useTelnyxWebRTC = (
                 ? Math.floor((Date.now() - callStartTime) / 1000)
                 : 0;
 
+              // CRITICAL FIX: More conservative voice mail detection
+              // Only detect voice mail if we have strong indicators
               if (detectVoiceMail(call, callDuration)) {
                 transitionCallState("voicemail", call);
               } else {
+                // Default to connected for answered calls
                 transitionCallState("connected", call);
               }
+
+              // Stop monitoring after successful state transition
+              clearInterval(callStateMonitor);
+              return;
             }
             break;
 

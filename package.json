@@ -10,6 +10,9 @@
     "fix-users": "node scripts/fix-user-creation.js",
     "test": "jest",
     "test:call-flow": "jest __tests__/call-flow.test.ts",
+    "test:call-flow-simulation": "jest __tests__/call-flow-simulation.test.ts",
+    "test:call-flow-all": "node scripts/run-call-flow-tests.js",
+    "test:call-flow-validation": "node scripts/validate-call-flow.js",
     "test:watch": "jest --watch",
     "test:coverage": "jest --coverage"
   },

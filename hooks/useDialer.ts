@@ -415,7 +415,8 @@ export const useDialer = (telnyxActions: {
   // Effects - placed after all actions are defined to avoid circular dependencies
   useEffect(() => {
     if (telnyxActions.error) {
-      // Check if this is a call failure error that should show popup
+      // CRITICAL FIX: More conservative error handling
+      // Only show error popup for actual call failures, not during active calls
       const isCallFailure =
         telnyxActions.error.includes("invalid") ||
         telnyxActions.error.includes("failed") ||
@@ -429,22 +430,24 @@ export const useDialer = (telnyxActions: {
         telnyxActions.error.includes("Call rejected") ||
         telnyxActions.error.includes("declined");
 
-      if (isCallFailure) {
-        // For call failures, show error popup and redirect to dialpad
+      // CRITICAL FIX: Don't show error popup during active calls unless it's a real failure
+      if (isCallFailure && !telnyxActions.isCallActive) {
+        // For call failures when not in active call, show error popup and redirect to dialpad
         showError(telnyxActions.error);
 
         // Only force reset if we're still in a call state
-        if (telnyxActions.isConnecting || telnyxActions.isCallActive) {
+        if (telnyxActions.isConnecting) {
           telnyxActions.forceResetCallState();
         }
-      } else if (telnyxActions.isConnecting || telnyxActions.isCallActive) {
-        // For other errors during active calls, just reset after 1.5 seconds
+      } else if (telnyxActions.isConnecting && !telnyxActions.isCallActive) {
+        // For other errors during connecting (but not active calls), just reset after 1.5 seconds
         const resetTimeout = setTimeout(() => {
           telnyxActions.forceResetCallState();
         }, 1500);
 
         return () => clearTimeout(resetTimeout);
       }
+      // CRITICAL FIX: Don't handle errors during active calls - let the call continue
     }
   }, [
     telnyxActions.error,
@@ -452,6 +455,7 @@ export const useDialer = (telnyxActions: {
     telnyxActions.isCallActive,
     telnyxActions.forceResetCallState,
     showError,
+    telnyxActions,
   ]);
 
   // Safety timeout to prevent calling screen from getting stuck indefinitely
@@ -467,6 +471,7 @@ export const useDialer = (telnyxActions: {
     telnyxActions.isConnecting,
     telnyxActions.isCallActive,
     telnyxActions.forceResetCallState,
+    telnyxActions,
   ]);
 
   // Early failure detection for calls stuck in "trying" state
@@ -495,6 +500,7 @@ export const useDialer = (telnyxActions: {
     telnyxActions.isConnecting,
     telnyxActions.forceResetCallState,
     showError,
+    telnyxActions,
   ]);
 
   // Voice mail detection and handling
