@@ -716,56 +716,73 @@ export const useTelnyxWebRTC = (
 
       // Call events - PRIMARY CALL HANDLER (replaces call.on() events)
       telnyxClient.on("call", (call: any) => {
-        // Telnyx client call event received
+        // Telnyx client call event received - EVENT-DRIVEN STATE SYNCHRONIZATION
+        console.log(`📞 Telnyx call event: ${call.state}`);
 
-        // PRIMARY CALL HANDLER - This is now our main way to handle calls
         if (call && call.state) {
           const currentTime = Date.now();
-          // Use currentCall's start time if available, otherwise estimate
           const callDuration =
             currentCall && callStartTime
               ? (currentTime - callStartTime) / 1000
               : 0;
 
-          // Primary call handler
+          // CRITICAL FIX: Use event-driven state updates instead of polling
+          // Map Telnyx call states directly to UI states
+          const stateMap: Record<string, CallState> = {
+            new: "dialing",
+            requesting: "dialing",
+            trying: "dialing",
+            early: "ringing",
+            ringing: "ringing",
+            connected: "connected",
+            active: "connected",
+            hangup: "ended",
+            destroy: "ended",
+            failed: "ended",
+          };
 
-          // IMMEDIATE FAILURE DETECTION - Only for actual failures, not normal call endings
-          if (call.state === "failed" && callState === "dialing") {
-            if (callDuration < 3) {
-              // Immediate failure detected
-              // Set error and immediately transition to idle
-              setError((prevError) => {
-                const failureMessage =
-                  "Call failed - Invalid phone number or number not reachable";
-                return prevError !== failureMessage
-                  ? failureMessage
-                  : prevError;
-              });
+          const targetUIState = stateMap[call.state];
+          if (targetUIState && callState !== targetUIState) {
+            console.log(
+              `🔄 Event-driven transition: ${callState} → ${targetUIState} (Telnyx: ${call.state})`
+            );
 
-              // Log call to database with failure status
-              trackCall(
-                call,
-                "failed",
-                Math.floor(callDuration),
-                currentDialedNumber || undefined
-              );
-
-              // Notify status
-              notifyCallStatus("failed", currentDialedNumber || undefined);
-
-              // Clean up call state immediately
-              setCurrentCall(null);
-              setCallControlId(null);
-              setCallStartTime(null);
-              setCurrentDialedNumber(null);
-
-              transitionCallState("idle", call);
-              return;
+            // Handle special cases
+            if (call.state === "answered") {
+              // Voice mail detection for answered calls
+              if (detectVoiceMail(call, callDuration)) {
+                transitionCallState("voicemail", call);
+              } else {
+                transitionCallState("connected", call);
+              }
+            } else if (call.state === "failed") {
+              // Handle failed calls immediately
+              if (callDuration < 5 && callState === "dialing") {
+                setError(
+                  "Call failed - Invalid phone number or number not reachable"
+                );
+                trackCall(
+                  call,
+                  "failed",
+                  Math.floor(callDuration),
+                  currentDialedNumber || undefined
+                );
+                notifyCallStatus("failed", currentDialedNumber || undefined);
+              }
+              transitionCallState("ended", call);
+            } else if (call.state === "hangup" || call.state === "destroy") {
+              // Handle call endings
+              if (call.state === "hangup") {
+                handleCallHangup(call, currentDialedNumber || "");
+              } else {
+                handleCallDestroy(call, currentDialedNumber || "");
+              }
+              transitionCallState("ended", call);
+            } else {
+              // Direct state mapping
+              transitionCallState(targetUIState, call);
             }
           }
-
-          // State transitions are now handled in the call monitoring interval
-          // This event handler is only for initial call creation
         }
       });
 
@@ -847,226 +864,24 @@ export const useTelnyxWebRTC = (
   // CALL HANDLING
   // ============================================================================
 
-  // COMPLETELY REWRITTEN CALL HANDLING SYSTEM - NO MORE call.on() RELIANCE
-  const handleCallCreation = useCallback(
-    (call: any, phoneNumber: string) => {
-      // Set initial call state
-      setCurrentCall(call);
-      setCallControlId(call.id);
-      setCallStartTime(Date.now());
-      setCurrentDialedNumber(phoneNumber);
+  // SIMPLIFIED CALL HANDLING - PURE EVENT-DRIVEN (NO POLLING)
+  const handleCallCreation = useCallback((call: any, phoneNumber: string) => {
+    // Set initial call state
+    setCurrentCall(call);
+    setCallControlId(call.id);
+    setCallStartTime(Date.now());
+    setCurrentDialedNumber(phoneNumber);
 
-      // Store the phone number in the call object to prevent race conditions
-      if (call) {
-        call.dialedPhoneNumber = phoneNumber;
-      }
+    // Store the phone number in the call object to prevent race conditions
+    if (call) {
+      call.dialedPhoneNumber = phoneNumber;
+    }
 
-      // Store call start time locally to avoid state update delays
-      const localCallStartTime = Date.now();
+    console.log(`📞 Call created: ${call.state} for ${phoneNumber}`);
 
-      // DON'T transition to dialing state here - let the monitor handle it based on actual Telnyx call states
-
-      // Start monitoring immediately - no delay needed since we're not setting UI state here
-      // AGGRESSIVE CALL STATE MONITORING - Check every 100ms for immediate response
-      const callStateMonitor = setInterval(() => {
-        if (!call || !call.state) {
-          clearInterval(callStateMonitor);
-          return;
-        }
-
-        const currentTime = Date.now();
-        const callDuration = (currentTime - localCallStartTime) / 1000;
-
-        // Read current UI state from ref to avoid stale closure
-        const currentUIState = currentCallStateRef.current;
-
-        // Add debugging for call state monitoring
-        console.log(
-          `🔍 Call monitor: Telnyx=${
-            call.state
-          }, UI=${currentUIState}, Duration=${callDuration.toFixed(1)}s`
-        );
-
-        // CRITICAL FIX: Handle state transitions with proper voice mail detection
-        const handleStateTransition = (
-          telnyxState: string,
-          currentUIState: CallState
-        ) => {
-          // Handle special case for answered calls - need voice mail detection
-          if (
-            telnyxState === "answered" &&
-            currentUIState !== "connected" &&
-            currentUIState !== "voicemail"
-          ) {
-            const callDuration = callStartTime
-              ? Math.floor((Date.now() - callStartTime) / 1000)
-              : 0;
-
-            console.log(
-              `📞 Processing answered call, duration: ${callDuration}s`
-            );
-
-            // CRITICAL FIX: More conservative voice mail detection
-            // Only detect voice mail if we have strong indicators
-            if (detectVoiceMail(call, callDuration)) {
-              console.log("🎙️ Voice mail detected, transitioning to voicemail");
-              transitionCallState("voicemail", call);
-            } else {
-              // Default to connected for answered calls
-              console.log(
-                "📞 Normal call answered, transitioning to connected"
-              );
-              transitionCallState("connected", call);
-            }
-
-            // Stop monitoring after successful state transition
-            console.log(
-              "📞 Stopping call state monitor after answered transition"
-            );
-            clearInterval(callStateMonitor);
-            return true;
-          }
-
-          // Handle other states with direct mapping
-          const stateMap: Record<string, CallState> = {
-            new: "dialing",
-            requesting: "dialing",
-            trying: "dialing",
-            early: "ringing",
-            ringing: "ringing",
-            connected: "connected",
-            active: "connected", // CRITICAL FIX: active state means call is connected
-            hangup: "ended",
-            destroy: "ended",
-            failed: "ended",
-          };
-
-          const targetState = stateMap[telnyxState];
-          if (targetState && currentUIState !== targetState) {
-            console.log(
-              `🔄 Direct transition: ${currentUIState} → ${targetState} (Telnyx: ${telnyxState})`
-            );
-            transitionCallState(targetState, call);
-            return true;
-          }
-          return false;
-        };
-
-        // Apply state transition with voice mail detection
-        const transitioned = handleStateTransition(call.state, currentUIState);
-
-        // CRITICAL: Monitor call flow for issues in development
-        monitorCallFlow(
-          call.state,
-          currentUIState,
-          isConnecting,
-          isCallActive,
-          callDuration
-        );
-
-        // IMMEDIATE FAILURE DETECTION - Only for actual failures, not normal call endings
-        // hangup and destroy are normal end states, not failures
-        if (
-          callDuration < 3 &&
-          call.state === "failed" && // Only treat "failed" state as actual failure
-          currentUIState === "dialing" // Only treat as failure if we're still in dialing state
-        ) {
-          // Set error FIRST before any state changes
-          const errorMessage =
-            "Call failed - Invalid phone number or number not reachable";
-          setError(errorMessage);
-
-          // Log call to Supabase BEFORE state transition
-          trackCall(call, "failed", Math.floor(callDuration), phoneNumber);
-
-          // Notify status
-          notifyCallStatus("failed", phoneNumber);
-
-          // DON'T transition to idle immediately for call failures
-          // Keep the call state as "failed" so the error popup can show
-          // transitionCallState("idle", call); // REMOVED - let error popup handle this
-
-          // Clean up call objects but keep state for UI
-          setCurrentCall(null);
-          setCallControlId(null);
-          setCallStartTime(null);
-          setCurrentDialedNumber(null);
-
-          // Stop monitoring
-          clearInterval(callStateMonitor);
-
-          return;
-        }
-
-        // Handle call end states
-        if (call.state === "hangup" || call.state === "destroy") {
-          if (currentUIState !== "ended") {
-            transitionCallState("ended", call);
-          }
-
-          if (call.state === "hangup") {
-            handleCallHangup(call, phoneNumber);
-          } else {
-            handleCallDestroy(call, phoneNumber);
-          }
-
-          clearInterval(callStateMonitor);
-          return;
-        }
-
-        if (call.state === "failed") {
-          handleCallFailed(call, phoneNumber);
-          clearInterval(callStateMonitor);
-          return;
-        }
-
-        // TIMEOUT HANDLING - If call is stuck in early stages for too long
-        // Increased timeout for international calls which can take longer to establish ICE connection
-        // Only timeout if we're still in early connection stages
-        if (
-          (call.state === "connecting" ||
-            call.state === "trying" ||
-            call.state === "dialing") &&
-          callDuration > 45 && // Increased from 15s to 45s for international calls
-          call.state !== "early" && // Don't timeout if we've reached "early" state (ICE connection established)
-          call.state !== "ringing" // Don't timeout if we've reached "ringing" state
-        ) {
-          console.log(
-            `⏰ Call timeout after ${callDuration}s in ${call.state} state`
-          );
-          // Log the call to Supabase before handling failure
-          trackCall(call, "failed", Math.floor(callDuration), phoneNumber);
-          notifyCallStatus("failed", phoneNumber);
-          handleCallFailed(call, phoneNumber);
-          clearInterval(callStateMonitor);
-        }
-
-        // CLEANUP MONITORING - Only stop monitoring after we've handled the state transition
-        // Don't stop monitoring for hangup/destroy - let the switch statement handle them first
-        if (
-          call.state === "connected" ||
-          call.state === "active" ||
-          call.state === "failed"
-        ) {
-          clearInterval(callStateMonitor);
-          return; // Exit the monitor loop
-        }
-      }, 100); // Check every 100ms for immediate response
-
-      // Store the interval for cleanup
-      timeoutManager.current.addInterval(callStateMonitor);
-    },
-    [
-      callState,
-      callStartTime,
-      transitionCallState,
-      trackCall,
-      notifyCallStatus,
-      detectVoiceMail,
-      isCallActive,
-      isConnecting,
-    ]
-  );
+    // NO POLLING - State updates are handled by Telnyx events only
+    // The telnyxClient.on("call") event handler manages all state transitions
+  }, []);
 
   // REWRITTEN CALL EVENT HANDLERS
   const handleCallHangup = useCallback(

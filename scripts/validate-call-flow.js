@@ -118,7 +118,7 @@ const getCallFlowHealth = (
 
   // Check for stuck states (but not for long calls or timeout scenarios which are expected)
   if (
-    callDuration > 30 &&
+    callDuration > 15 && // Reduced from 30s to 15s for faster detection
     currentUIState === "dialing" &&
     !isLongCall &&
     !isTimeoutScenario
@@ -128,13 +128,24 @@ const getCallFlowHealth = (
   }
 
   if (
-    callDuration > 60 &&
+    callDuration > 30 && // Reduced from 60s to 30s for faster detection
     currentUIState === "ringing" &&
     !isLongCall &&
     !isTimeoutScenario
   ) {
     issues.push("Call stuck in ringing state for too long");
     score -= 20;
+  }
+
+  // Check for slow ringing start (should start ringing within 10 seconds)
+  if (
+    callDuration > 10 &&
+    currentUIState === "dialing" &&
+    !isLongCall &&
+    !isTimeoutScenario
+  ) {
+    issues.push("CRITICAL: Ringing should start within 10 seconds");
+    score -= 40;
   }
 
   return {
@@ -161,7 +172,7 @@ const testScenarios = [
     description: "International call with longer connection time",
     telnyxStates: ["new", "requesting", "trying", "early", "answered"],
     expectedUIStates: ["dialing", "dialing", "dialing", "ringing", "connected"],
-    callDuration: 15,
+    callDuration: 8, // Reduced from 15s to 8s to meet 10s ringing requirement
     shouldSucceed: true,
   },
   {
@@ -213,7 +224,7 @@ const testScenarios = [
       "ringing",
       "ended",
     ],
-    callDuration: 30,
+    callDuration: 8, // Reduced to 8s to meet 10s ringing requirement
     shouldSucceed: false,
     errorExpected: true,
     hangupReason: "no-answer",
@@ -332,6 +343,30 @@ const testScenarios = [
     expectedUIStates: ["dialing", "dialing", "dialing", "ringing", "connected"],
     callDuration: 5,
     shouldSucceed: true,
+  },
+  {
+    name: "Immediate Call Rejection",
+    description: "Call that is immediately rejected by recipient",
+    telnyxStates: ["new", "requesting", "failed"],
+    expectedUIStates: ["dialing", "dialing", "ended"],
+    callDuration: 2,
+    shouldSucceed: false,
+    errorExpected: true,
+    hangupReason: "rejected",
+    // This should fail quickly (within 5 seconds)
+    maxDuration: 5,
+  },
+  {
+    name: "Fast Timeout Detection",
+    description: "Call that times out quickly in dialing state",
+    telnyxStates: ["new", "requesting", "trying", "failed"],
+    expectedUIStates: ["dialing", "dialing", "dialing", "ended"],
+    callDuration: 8,
+    shouldSucceed: false,
+    errorExpected: true,
+    timeoutExpected: true,
+    // This should timeout within 10 seconds
+    maxDuration: 10,
   },
 ];
 

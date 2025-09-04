@@ -264,8 +264,15 @@ export const useDialer = (telnyxActions: {
       return;
     }
 
+    // CRITICAL FIX: Prevent duplicate calls with more comprehensive checks
     if (telnyxActions.isConnecting || telnyxActions.isCallActive) {
       setErrorMessageAction("Call already in progress");
+      return;
+    }
+
+    // Additional check to prevent calls when in any non-idle state
+    if (telnyxActions.callState !== "idle") {
+      setErrorMessageAction("Please wait for current call to complete");
       return;
     }
 
@@ -452,68 +459,17 @@ export const useDialer = (telnyxActions: {
     telnyxActions,
   ]);
 
-  // Safety timeout to prevent calling screen from getting stuck indefinitely
-  useEffect(() => {
-    if (telnyxActions.isConnecting && !telnyxActions.isCallActive) {
-      // CRITICAL FIX: Don't timeout if we're in ringing state (call is progressing normally)
-      // Only timeout if we're stuck in dialing/trying states
-      if (
-        telnyxActions.callState === "ringing" ||
-        telnyxActions.callState === "early"
-      ) {
-        console.log("🔔 Call is ringing, not applying safety timeout");
-        return;
-      }
+  // REMOVED: Safety timeout - UI should be in sync with Telnyx call status
+  // The UI state should be driven by Telnyx events, not timeouts
+  // useEffect(() => {
+  //   // Safety timeout logic removed - relying on event-driven state synchronization
+  // }, []);
 
-      console.log(
-        `⏰ Safety timeout started for call state: ${telnyxActions.callState}`
-      );
-      const safetyTimeout = setTimeout(() => {
-        console.log("⏰ Safety timeout triggered - forcing call reset");
-        telnyxActions.forceResetCallState();
-      }, 15000); // Increased to 15 seconds for international calls
-
-      return () => {
-        console.log("⏰ Safety timeout cleared");
-        clearTimeout(safetyTimeout);
-      };
-    }
-  }, [
-    telnyxActions.isConnecting,
-    telnyxActions.isCallActive,
-    telnyxActions.callState,
-    telnyxActions.forceResetCallState,
-    telnyxActions,
-  ]);
-
-  // Early failure detection for calls stuck in "trying" state
-  // Increased timeout for international calls which may take longer to connect
-  useEffect(() => {
-    // Only trigger early failure if we're in "trying" or "dialing" state AND not connecting AND not call active
-    // Don't timeout if we're ringing (which means the call is progressing normally)
-    if (
-      (telnyxActions.callState === "trying" ||
-        telnyxActions.callState === "dialing") &&
-      !telnyxActions.isCallActive &&
-      !telnyxActions.isConnecting
-    ) {
-      const earlyFailureTimeout = setTimeout(() => {
-        // If call has been in "trying" state for more than 45 seconds, force failure
-        // This gives international calls more time to connect
-        showError("Call failed - Number not reachable");
-        telnyxActions.forceResetCallState();
-      }, 45000); // 45 seconds for early failure detection (increased for international calls)
-
-      return () => clearTimeout(earlyFailureTimeout);
-    }
-  }, [
-    telnyxActions.callState,
-    telnyxActions.isCallActive,
-    telnyxActions.isConnecting,
-    telnyxActions.forceResetCallState,
-    showError,
-    telnyxActions,
-  ]);
+  // REMOVED: Early failure detection timeout - UI should be in sync with Telnyx call status
+  // The UI state should be driven by Telnyx events, not timeouts
+  // useEffect(() => {
+  //   // Early failure detection logic removed - relying on event-driven state synchronization
+  // }, []);
 
   // CRITICAL FIX: Add error recovery mechanisms
   const attemptErrorRecovery = useCallback(async () => {
@@ -547,17 +503,18 @@ export const useDialer = (telnyxActions: {
     }
   }, [telnyxActions]);
 
-  // Auto-recovery for common error states
-  useEffect(() => {
-    if (telnyxActions.error && !telnyxActions.isCallActive) {
-      // Wait a bit before attempting recovery to avoid rapid retries
-      const recoveryTimeout = setTimeout(() => {
-        attemptErrorRecovery();
-      }, 2000);
+  // DISABLED: Auto-recovery for common error states to prevent duplicate calls
+  // Users should manually retry calls instead of automatic recovery
+  // useEffect(() => {
+  //   if (telnyxActions.error && !telnyxActions.isCallActive) {
+  //     // Wait a bit before attempting recovery to avoid rapid retries
+  //     const recoveryTimeout = setTimeout(() => {
+  //       attemptErrorRecovery();
+  //     }, 2000);
 
-      return () => clearTimeout(recoveryTimeout);
-    }
-  }, [telnyxActions.error, telnyxActions.isCallActive, attemptErrorRecovery]);
+  //     return () => clearTimeout(recoveryTimeout);
+  //   }
+  // }, [telnyxActions.error, telnyxActions.isCallActive, attemptErrorRecovery]);
 
   // Voice mail detection and handling
   useEffect(() => {
