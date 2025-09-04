@@ -160,7 +160,7 @@ const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
             {isAdmin && (
               <button
                 onClick={() => {
-                  window.location.href = "/admin";
+                  window.open("/admin", "_blank", "noopener,noreferrer");
                   setIsOpen(false);
                 }}
                 className="block w-full text-left px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 transition-colors border-t border-gray-100"
@@ -178,6 +178,20 @@ const SettingsDropdown: React.FC<SettingsDropdownProps> = ({
                     />
                   </svg>
                   Admin Dashboard
+                  <svg
+                    className="w-3 h-3 ml-2 text-gray-400"
+                    fill="none"
+                    stroke="currentColor"
+                    viewBox="0 0 24 24"
+                    xmlns="http://www.w3.org/2000/svg"
+                  >
+                    <path
+                      strokeLinecap="round"
+                      strokeLinejoin="round"
+                      strokeWidth={2}
+                      d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14"
+                    />
+                  </svg>
                 </div>
               </button>
             )}
