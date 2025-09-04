@@ -152,6 +152,11 @@ export const useTelnyxWebRTC = (
   // Use ref to track current call state to avoid stale closures in monitor
   const currentCallStateRef = useRef<CallState>(callState);
 
+  // CRITICAL FIX: Keep ref in sync with callState
+  useEffect(() => {
+    currentCallStateRef.current = callState;
+  }, [callState]);
+
   // Audio state
   const [hasMicrophoneAccess, setHasMicrophoneAccess] = useState(false);
   const [networkQuality, setNetworkQuality] = useState<NetworkQuality>("good");
@@ -291,6 +296,10 @@ export const useTelnyxWebRTC = (
         case "ended":
           setIsConnecting(false);
           setIsCallActive(false);
+          setCurrentCall(null);
+          setCallControlId(null);
+          setCallStartTime(null);
+          setCurrentDialedNumber(null);
           setError(null);
           // Automatically transition to idle after a short delay to show the ended state
           setTimeout(() => {
@@ -742,9 +751,10 @@ export const useTelnyxWebRTC = (
           };
 
           const targetUIState = stateMap[call.state];
-          if (targetUIState && callState !== targetUIState) {
+          // CRITICAL FIX: Use ref to avoid stale closure
+          if (targetUIState && currentCallStateRef.current !== targetUIState) {
             console.log(
-              `🔄 Event-driven transition: ${callState} → ${targetUIState} (Telnyx: ${call.state})`
+              `🔄 Event-driven transition: ${currentCallStateRef.current} → ${targetUIState} (Telnyx: ${call.state})`
             );
 
             // Handle special cases
@@ -757,7 +767,10 @@ export const useTelnyxWebRTC = (
               }
             } else if (call.state === "failed") {
               // Handle failed calls immediately
-              if (callDuration < 5 && callState === "dialing") {
+              if (
+                callDuration < 5 &&
+                currentCallStateRef.current === "dialing"
+              ) {
                 setError(
                   "Call failed - Invalid phone number or number not reachable"
                 );
