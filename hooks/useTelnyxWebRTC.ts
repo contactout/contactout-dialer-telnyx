@@ -284,7 +284,7 @@ export const useTelnyxWebRTC = (
           break;
       }
     },
-    [cleanupAll]
+    [cleanupAll, callStartTime]
   );
 
   // ============================================================================
@@ -294,6 +294,7 @@ export const useTelnyxWebRTC = (
   /**
    * Detect if a call has been forwarded to voice mail
    * Based on Telnyx call patterns and duration analysis
+   * FIXED: Made voice mail detection more conservative to avoid false positives
    */
   const detectVoiceMail = useCallback(
     (call: any, callDuration: number): boolean => {
@@ -302,45 +303,55 @@ export const useTelnyxWebRTC = (
         let confidence = 0;
         const patterns = [];
 
-        // Pattern 1: Call answered but very short (typical voice mail greeting)
-        if (call.state === "answered" && callDuration < 3) {
-          confidence += 3;
-          patterns.push("Quick answer (< 3s)");
+        // CRITICAL FIX: Only use reliable indicators, not just timing
+        // Pattern 1: Check for specific Telnyx voice mail indicators (most reliable)
+        if (call.state === "answered" && call.voice_mail_detected) {
+          confidence += 8;
+          patterns.push("Telnyx voice mail flag");
         }
 
-        // Pattern 2: Call answered but short duration (voice mail pattern)
-        if (call.state === "answered" && callDuration < 5) {
-          confidence += 2;
-          patterns.push("Short duration (< 5s)");
+        // Pattern 2: Check for machine answer patterns (reliable)
+        if (call.state === "answered" && call.machine_answer) {
+          confidence += 6;
+          patterns.push("Machine answer detected");
         }
 
-        // Pattern 3: Call answered after long ring (typical voice mail behavior)
-        if (call.state === "answered" && callDuration < 8) {
-          confidence += 1;
-          patterns.push("Long ring to answer (< 8s)");
+        // Pattern 3: Check for specific voice mail headers or metadata
+        if (
+          call.state === "answered" &&
+          call.headers &&
+          (call.headers["X-Voice-Mail"] === "true" ||
+            call.headers["X-Answer-Type"] === "machine")
+        ) {
+          confidence += 7;
+          patterns.push("Voice mail header detected");
         }
 
-        // Pattern 4: Check if call has specific voice mail indicators
-        if (call.state === "answered" && call.legs && call.legs.length > 0) {
+        // Pattern 4: Multiple call legs (less reliable, but can indicate forwarding)
+        if (call.state === "answered" && call.legs && call.legs.length > 1) {
           confidence += 2;
           patterns.push("Multiple call legs");
         }
 
-        // Pattern 5: Check for specific Telnyx voice mail indicators
-        if (call.state === "answered" && call.voice_mail_detected) {
-          confidence += 5;
-          patterns.push("Telnyx voice mail flag");
+        // Pattern 5: Very short call duration combined with specific patterns
+        // Only consider this if we have other indicators
+        if (call.state === "answered" && callDuration < 2 && confidence > 0) {
+          confidence += 1;
+          patterns.push("Very short duration with other indicators");
         }
 
-        // Pattern 6: Check for machine answer patterns
-        if (call.state === "answered" && call.machine_answer) {
-          confidence += 4;
-          patterns.push("Machine answer detected");
+        // CRITICAL FIX: Require much higher confidence to avoid false positives
+        // Normal calls should NOT be classified as voice mail
+        const isVoiceMail = confidence >= 6; // Increased threshold from 3 to 6
+
+        // Log voice mail detection in development for debugging
+        if (process.env.NODE_ENV === "development" && confidence > 0) {
+          console.log(
+            `🎙️ Voice mail detection: confidence=${confidence}, patterns=[${patterns.join(
+              ", "
+            )}], result=${isVoiceMail}`
+          );
         }
-
-        const isVoiceMail = confidence >= 3; // Require at least 3 confidence points
-
-        // Voice mail detection logging removed for production
 
         return isVoiceMail;
       } catch (error) {
@@ -348,7 +359,7 @@ export const useTelnyxWebRTC = (
         return false;
       }
     },
-    [callStartTime]
+    []
   );
 
   // ============================================================================
@@ -1096,7 +1107,14 @@ export const useTelnyxWebRTC = (
       setCallStartTime(null);
       setCurrentDialedNumber(null);
     },
-    [callStartTime, transitionCallState, trackCall, notifyCallStatus]
+    [
+      callStartTime,
+      callState,
+      error,
+      transitionCallState,
+      trackCall,
+      notifyCallStatus,
+    ]
   );
 
   const handleCallDestroy = useCallback(
@@ -1105,20 +1123,27 @@ export const useTelnyxWebRTC = (
         ? Math.floor((Date.now() - callStartTime) / 1000)
         : 0;
 
-      // Determine call status based on duration
+      // Determine call status based on duration and call state
       let callStatus: "completed" | "failed" = "completed";
       let errorMessage = "";
 
-      if (duration < 2) {
-        // Very short call - likely invalid number
+      // CRITICAL FIX: Only mark as failed if we have clear indicators of failure
+      // Don't assume short calls are failures - they might be successful but brief
+      if (duration < 1) {
+        // Extremely short call - likely invalid number or immediate failure
         callStatus = "failed";
         errorMessage =
           "Call failed - Invalid phone number or number not reachable";
-      } else if (duration < 5) {
-        // Short call - might be temporary unavailability
+      } else if (duration < 3 && currentCallStateRef.current === "dialing") {
+        // Very short call that never progressed past dialing - likely failure
         callStatus = "failed";
-        errorMessage = "Call failed - Number temporarily unavailable";
+        errorMessage = "Call failed - Number not reachable";
+      } else if (duration < 3 && currentCallStateRef.current === "ringing") {
+        // Very short call that never progressed past ringing - likely failure
+        callStatus = "failed";
+        errorMessage = "Call failed - No answer";
       }
+      // For all other cases, including short successful calls, mark as completed
 
       // Set error if call failed (but only if not already set)
       if (callStatus === "failed") {

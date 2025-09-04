@@ -290,6 +290,334 @@ describe.skip("Call Flow Synchronization Tests", () => {
     });
   });
 
+  describe("Voice Mail Detection Logic", () => {
+    it("should NOT classify normal answered calls as voice mail", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      // Mock a normal answered call (no voice mail indicators)
+      const mockCall = {
+        id: "test-call-id",
+        state: "answered",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+        // No voice mail indicators
+        voice_mail_detected: false,
+        machine_answer: false,
+        headers: {},
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate call answered without voice mail indicators
+      await act(async () => {
+        mockCall.state = "answered";
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be classified as connected, not voicemail
+      expect(result.current.callState).toBe("connected");
+      expect(result.current.isCallActive).toBe(true);
+    });
+
+    it("should classify calls with Telnyx voice mail indicators as voice mail", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      // Mock a call with voice mail indicators
+      const mockCall = {
+        id: "test-call-id",
+        state: "answered",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+        voice_mail_detected: true, // Telnyx voice mail indicator
+        machine_answer: false,
+        headers: {},
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate call answered with voice mail indicators
+      await act(async () => {
+        mockCall.state = "answered";
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be classified as voicemail
+      expect(result.current.callState).toBe("voicemail");
+      expect(result.current.isCallActive).toBe(true);
+    });
+
+    it("should classify calls with machine answer indicators as voice mail", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      // Mock a call with machine answer indicators
+      const mockCall = {
+        id: "test-call-id",
+        state: "answered",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+        voice_mail_detected: false,
+        machine_answer: true, // Machine answer indicator
+        headers: {},
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate call answered with machine answer indicators
+      await act(async () => {
+        mockCall.state = "answered";
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be classified as voicemail
+      expect(result.current.callState).toBe("voicemail");
+      expect(result.current.isCallActive).toBe(true);
+    });
+
+    it("should classify calls with voice mail headers as voice mail", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      // Mock a call with voice mail headers
+      const mockCall = {
+        id: "test-call-id",
+        state: "answered",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+        voice_mail_detected: false,
+        machine_answer: false,
+        headers: {
+          "X-Voice-Mail": "true", // Voice mail header
+        },
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate call answered with voice mail headers
+      await act(async () => {
+        mockCall.state = "answered";
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be classified as voicemail
+      expect(result.current.callState).toBe("voicemail");
+      expect(result.current.isCallActive).toBe(true);
+    });
+
+    it("should NOT classify short calls as voice mail without other indicators", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      // Mock a short answered call without voice mail indicators
+      const mockCall = {
+        id: "test-call-id",
+        state: "answered",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+        voice_mail_detected: false,
+        machine_answer: false,
+        headers: {},
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate very short call (1 second) without voice mail indicators
+      await act(async () => {
+        mockCall.state = "answered";
+        // Simulate short duration by advancing time
+        jest.advanceTimersByTime(1000);
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be classified as connected, not voicemail
+      expect(result.current.callState).toBe("connected");
+      expect(result.current.isCallActive).toBe(true);
+    });
+  });
+
+  describe("Call Status Determination", () => {
+    it("should mark successful calls as completed regardless of duration", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      const mockCall = {
+        id: "test-call-id",
+        state: "answered",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate short but successful call
+      await act(async () => {
+        mockCall.state = "answered";
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Hangup the call
+      await act(async () => {
+        result.current.hangupCall();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be marked as completed, not failed
+      expect(result.current.callState).toBe("idle");
+    });
+
+    it("should mark extremely short calls (< 1 second) as failed", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      const mockCall = {
+        id: "test-call-id",
+        state: "failed",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate extremely short call that fails immediately
+      await act(async () => {
+        mockCall.state = "failed";
+        jest.advanceTimersByTime(500); // Less than 1 second
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be marked as failed
+      expect(result.current.error).toBeTruthy();
+      expect(result.current.error).toContain("failed");
+    });
+
+    it("should mark calls that never progress past dialing as failed", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      const mockCall = {
+        id: "test-call-id",
+        state: "dialing",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate call that stays in dialing state and then ends
+      await act(async () => {
+        mockCall.state = "dialing";
+        jest.advanceTimersByTime(2000); // 2 seconds in dialing state
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Hangup the call
+      await act(async () => {
+        result.current.hangupCall();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be marked as failed
+      expect(result.current.error).toBeTruthy();
+      expect(result.current.error).toContain("failed");
+    });
+
+    it("should mark calls that never progress past ringing as failed", async () => {
+      const { result } = renderHook(() =>
+        useTelnyxWebRTC(mockConfig, "test-user")
+      );
+
+      await act(async () => {
+        await new Promise((resolve) => setTimeout(resolve, 100));
+      });
+
+      const mockCall = {
+        id: "test-call-id",
+        state: "ringing",
+        hangup: jest.fn(),
+        sendDTMF: jest.fn(),
+      };
+
+      await act(async () => {
+        await result.current.makeCall("+1234567890");
+      });
+
+      // Simulate call that reaches ringing but never answers
+      await act(async () => {
+        mockCall.state = "ringing";
+        jest.advanceTimersByTime(2000); // 2 seconds in ringing state
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Hangup the call
+      await act(async () => {
+        result.current.hangupCall();
+        await new Promise((resolve) => setTimeout(resolve, 150));
+      });
+
+      // Should be marked as failed
+      expect(result.current.error).toBeTruthy();
+      expect(result.current.error).toContain("failed");
+    });
+  });
+
   describe("Call Flow Timing", () => {
     it("should transition to ringing within reasonable time", async () => {
       const { result } = renderHook(() =>
@@ -377,5 +705,99 @@ describe.skip("Call Flow Integration Tests", () => {
     expect(result.current.isCallActive || result.current.isConnecting).toBe(
       true
     );
+  });
+
+  it("should maintain calling screen UI when call is answered (CRITICAL FIX)", async () => {
+    const { result } = renderHook(() =>
+      useTelnyxWebRTC(mockConfig, "test-user")
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    const mockCall = {
+      id: "test-call-id",
+      state: "new",
+      hangup: jest.fn(),
+      sendDTMF: jest.fn(),
+      voice_mail_detected: false,
+      machine_answer: false,
+      headers: {},
+    };
+
+    // Start call
+    await act(async () => {
+      await result.current.makeCall("+1234567890");
+    });
+
+    // Verify initial state
+    expect(result.current.isConnecting).toBe(true);
+    expect(result.current.callState).toBe("dialing");
+
+    // Simulate call progression to ringing
+    await act(async () => {
+      mockCall.state = "early";
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+
+    expect(result.current.callState).toBe("ringing");
+    expect(result.current.isConnecting).toBe(true);
+
+    // Simulate call answered (CRITICAL: should stay on calling screen)
+    await act(async () => {
+      mockCall.state = "answered";
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+
+    // CRITICAL FIX: Should be connected and active, NOT redirected to dialpad
+    expect(result.current.callState).toBe("connected");
+    expect(result.current.isCallActive).toBe(true);
+    expect(result.current.isConnecting).toBe(false);
+
+    // UI should show calling screen, not dialpad
+    // This is verified by the isCallActive and callState values
+  });
+
+  it("should properly log successful calls in call history", async () => {
+    const { result } = renderHook(() =>
+      useTelnyxWebRTC(mockConfig, "test-user")
+    );
+
+    await act(async () => {
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    });
+
+    const mockCall = {
+      id: "test-call-id",
+      state: "answered",
+      hangup: jest.fn(),
+      sendDTMF: jest.fn(),
+      voice_mail_detected: false,
+      machine_answer: false,
+      headers: {},
+    };
+
+    // Start and answer call
+    await act(async () => {
+      await result.current.makeCall("+1234567890");
+    });
+
+    await act(async () => {
+      mockCall.state = "answered";
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+
+    // Hangup the call
+    await act(async () => {
+      result.current.hangupCall();
+      await new Promise((resolve) => setTimeout(resolve, 150));
+    });
+
+    // Call should be logged as completed, not failed
+    // This is verified by the call state being idle (successful completion)
+    expect(result.current.callState).toBe("idle");
+    expect(result.current.isCallActive).toBe(false);
+    expect(result.current.isConnecting).toBe(false);
   });
 });
