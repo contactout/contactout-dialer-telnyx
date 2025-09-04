@@ -1,0 +1,33 @@
+#!/usr/bin/env sh
+. "$(dirname -- "$0")/_/husky.sh"
+
+# CRITICAL: Call Flow Tests
+# These tests must pass before any commit to prevent the call flow sync issue from recurring
+
+echo "🧪 Running critical call flow tests..."
+
+# Run call flow tests specifically
+npm test -- __tests__/call-flow.test.ts --passWithNoTests
+
+# Check if tests passed
+if [ $? -ne 0 ]; then
+  echo "❌ Call flow tests failed! This could break the critical call synchronization."
+  echo "Please fix the failing tests before committing."
+  echo ""
+  echo "The call flow synchronization between Telnyx and UI is critical for user experience."
+  echo "If these tests fail, users may experience delayed ringing or other call flow issues."
+  exit 1
+fi
+
+echo "✅ Call flow tests passed - call synchronization is working correctly"
+
+# Run other tests
+echo "🧪 Running other tests..."
+npm test -- --passWithNoTests
+
+if [ $? -ne 0 ]; then
+  echo "❌ Some tests failed. Please fix them before committing."
+  exit 1
+fi
+
+echo "✅ All tests passed - safe to commit"

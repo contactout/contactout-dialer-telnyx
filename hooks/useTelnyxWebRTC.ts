@@ -1,18 +1,19 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { TelnyxRTC } from "@telnyx/webrtc";
 import { DatabaseService } from "@/lib/database";
+import {
+  validateCallFlowSequence,
+  validateRingingStateTransition,
+  monitorCallFlow,
+  getCallFlowHealth,
+  type CallState,
+} from "@/lib/callStateValidator";
 
 // ============================================================================
 // TYPES AND INTERFACES
 // ============================================================================
 
-type CallState =
-  | "idle"
-  | "dialing"
-  | "ringing"
-  | "connected"
-  | "voicemail"
-  | "ended";
+// CallState type is now imported from callStateValidator
 
 type NetworkQuality = "excellent" | "good" | "fair" | "poor";
 
@@ -63,6 +64,14 @@ interface UseTelnyxWebRTCReturn {
   debugAudioSetup: () => void;
   triggerReconnection: () => void;
   retryMicrophoneAccess: () => void;
+
+  // Call flow monitoring
+  getCallFlowHealth: () => {
+    isHealthy: boolean;
+    score: number;
+    issues: string[];
+    recommendations: string[];
+  };
 }
 
 // ============================================================================
@@ -339,7 +348,7 @@ export const useTelnyxWebRTC = (
         return false;
       }
     },
-    []
+    [callStartTime]
   );
 
   // ============================================================================
@@ -724,6 +733,11 @@ export const useTelnyxWebRTC = (
       callState,
       isConnecting,
       detectVoiceMail,
+      currentCall,
+      currentDialedNumber,
+      error,
+      isCallActive,
+      isReconnecting,
     ]
   );
 
@@ -764,19 +778,28 @@ export const useTelnyxWebRTC = (
         // Read current UI state from ref to avoid stale closure
         const currentUIState = currentCallStateRef.current;
 
-        // CRITICAL FIX: If we're in "trying" state but UI is still "idle", force the transition
-        if (call.state === "trying" && currentUIState === "idle") {
-          setCallState("dialing");
-          // Force immediate state update and skip this cycle
+        // CRITICAL: Use validator to ensure proper call flow synchronization
+        const flowValidation = validateCallFlowSequence(
+          call.state,
+          currentUIState
+        );
+
+        if (flowValidation.shouldTransition && flowValidation.targetState) {
+          console.log(
+            `🔄 Call flow transition: ${currentUIState} → ${flowValidation.targetState} (${flowValidation.reason})`
+          );
+          transitionCallState(flowValidation.targetState, call);
           return;
         }
 
-        // CRITICAL FIX: If we're in "early" state but UI is still "idle", force the transition
-        if (call.state === "early" && currentUIState === "idle") {
-          setCallState("ringing");
-          // Force immediate state update and skip this cycle
-          return;
-        }
+        // CRITICAL: Monitor call flow for issues in development
+        monitorCallFlow(
+          call.state,
+          currentUIState,
+          isConnecting,
+          isCallActive,
+          callDuration
+        );
 
         // IMMEDIATE FAILURE DETECTION - Only for actual failures, not normal call endings
         // hangup and destroy are normal end states, not failures
@@ -817,21 +840,21 @@ export const useTelnyxWebRTC = (
         switch (call.state) {
           case "new":
             // Call just created - transition to dialing
-            if (currentUIState === "idle") {
+            if (currentUIState !== "dialing") {
               transitionCallState("dialing", call);
             }
             break;
 
           case "requesting":
             // Call is being requested - ensure we're in dialing state
-            if (currentUIState === "idle") {
+            if (currentUIState !== "dialing") {
               transitionCallState("dialing", call);
             }
             break;
 
           case "trying":
             // Call is trying to connect - ensure we're in dialing state
-            if (currentUIState === "idle") {
+            if (currentUIState !== "dialing") {
               transitionCallState("dialing", call);
             }
             break;
@@ -935,6 +958,11 @@ export const useTelnyxWebRTC = (
       trackCall,
       notifyCallStatus,
       detectVoiceMail,
+      handleCallDestroy,
+      handleCallFailed,
+      handleCallHangup,
+      isCallActive,
+      isConnecting,
     ]
   );
 
@@ -1410,7 +1438,8 @@ export const useTelnyxWebRTC = (
       try {
         setIsConnecting(true);
         setError(null);
-        // DON'T set UI state here - let the monitor handle it based on actual Telnyx call states
+        // Set initial dialing state immediately when call is initiated
+        transitionCallState("dialing");
 
         // Create call using Telnyx best practices
         let call: any;
@@ -1613,6 +1642,27 @@ export const useTelnyxWebRTC = (
     // Debug function - can be expanded as needed
   }, []);
 
+  // Call flow health check
+  const getCallFlowHealthCheck = useCallback(() => {
+    const callDuration = callStartTime
+      ? (Date.now() - callStartTime) / 1000
+      : 0;
+
+    return getCallFlowHealth(
+      currentCall?.state || "idle",
+      callState,
+      isConnecting,
+      isCallActive,
+      callDuration
+    );
+  }, [
+    currentCall?.state,
+    callState,
+    isConnecting,
+    isCallActive,
+    callStartTime,
+  ]);
+
   // ============================================================================
   // CLEANUP ON UNMOUNT
   // ============================================================================
@@ -1659,5 +1709,8 @@ export const useTelnyxWebRTC = (
     debugAudioSetup,
     triggerReconnection,
     retryMicrophoneAccess,
+
+    // Call flow monitoring
+    getCallFlowHealth: getCallFlowHealthCheck,
   };
 };

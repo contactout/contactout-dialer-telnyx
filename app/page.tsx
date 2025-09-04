@@ -20,6 +20,7 @@ import DTMFSettings from "@/components/DTMFSettings";
 import ErrorPopup from "@/components/ErrorPopup";
 import ErrorBoundary from "@/components/ErrorBoundary";
 import SettingsDropdown from "@/components/SettingsDropdown";
+import CallFlowMonitor from "@/components/CallFlowMonitor";
 
 import LoginScreen from "@/components/LoginScreen";
 
@@ -465,6 +466,16 @@ export default function Home() {
           error={state.errorMessage}
           isVisible={state.showErrorPopup}
           onClose={logic.handleErrorPopupClose}
+        />
+
+        {/* Call Flow Monitor - Development Only */}
+        <CallFlowMonitor
+          telnyxState={telnyxActions.callState || "idle"}
+          uiState={telnyxActions.callState || "idle"}
+          isConnecting={telnyxActions.isConnecting}
+          isCallActive={telnyxActions.isCallActive}
+          callDuration={state.callDuration}
+          getCallFlowHealth={telnyxActions.getCallFlowHealth}
         />
       </main>
     </ErrorBoundary>
