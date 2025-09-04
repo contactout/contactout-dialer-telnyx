@@ -10,9 +10,6 @@ const customJestConfig = {
   setupFilesAfterEnv: ["<rootDir>/jest.setup.js"],
   testEnvironment: "jsdom",
   testPathIgnorePatterns: ["<rootDir>/.next/", "<rootDir>/node_modules/"],
-  moduleNameMapping: {
-    "^@/(.*)$": "<rootDir>/$1",
-  },
   // Focus on call flow tests by default
   testMatch: [
     "**/__tests__/**/*.(test|spec).(js|jsx|ts|tsx)",

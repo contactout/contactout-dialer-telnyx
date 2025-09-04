@@ -958,9 +958,6 @@ export const useTelnyxWebRTC = (
       trackCall,
       notifyCallStatus,
       detectVoiceMail,
-      handleCallDestroy,
-      handleCallFailed,
-      handleCallHangup,
       isCallActive,
       isConnecting,
     ]
