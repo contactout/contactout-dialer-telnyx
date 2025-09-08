@@ -1,5 +1,6 @@
 import React, { useEffect } from "react";
 import { useCallAudio } from "@/hooks/useCallAudio";
+import { useCallTimer } from "@/hooks/useCallTimer";
 import { detectCountry, formatPhoneNumber } from "@/lib/phoneNumberUtils";
 
 interface CallingScreenProps {
@@ -35,6 +36,18 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
     statusVolume: 0.25,
     ringtoneStyle: "modern", // Use modern ringtone by default
   });
+
+  // Use the call timer hook
+  const {
+    ringingElapsed,
+    activeElapsed,
+    startRingingTimer,
+    startActiveTimer,
+    stopRingingTimer,
+    stopActiveTimer,
+    resetTimers,
+    formatTime,
+  } = useCallTimer();
 
   // Initialize audio context
   useEffect(() => {
@@ -117,6 +130,38 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
       return () => clearTimeout(timer);
     }
   }, [isCallActive, isConnecting, callState, playCallAudio]);
+
+  // Timer management based on call states
+  useEffect(() => {
+    // Handle ringing timer
+    if (isConnecting && (callState === "ringing" || callState === "early")) {
+      startRingingTimer();
+    } else {
+      stopRingingTimer();
+    }
+
+    // Handle active call timer
+    if (isCallActive && callState === "connected") {
+      startActiveTimer();
+    } else {
+      stopActiveTimer();
+    }
+
+    // Reset all timers when call ends or error occurs
+    if (error || (!isConnecting && !isCallActive && callState === "idle")) {
+      resetTimers();
+    }
+  }, [
+    isConnecting,
+    isCallActive,
+    callState,
+    error,
+    startRingingTimer,
+    stopRingingTimer,
+    startActiveTimer,
+    stopActiveTimer,
+    resetTimers,
+  ]);
 
   // Get simplified status text
   const getStatusText = () => {
@@ -213,13 +258,38 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
         {/* Status Text */}
         <div className="mb-6 text-sm text-gray-600">{getStatusText()}</div>
 
-        {/* Call Duration - only show when call is active */}
-        {isCallActive && callDuration > 0 && (
-          <div className="mb-6 text-lg font-mono text-gray-700">
-            {Math.floor(callDuration / 60)}:
-            {(callDuration % 60).toString().padStart(2, "0")}
+        {/* Ringing Timer - show when call is ringing */}
+        {isConnecting &&
+          (callState === "ringing" || callState === "early") &&
+          ringingElapsed > 0 && (
+            <div className="mb-6">
+              <div className="text-sm text-gray-500 mb-1">Ringing for</div>
+              <div className="text-lg font-mono text-blue-600">
+                {formatTime(ringingElapsed)}
+              </div>
+            </div>
+          )}
+
+        {/* Active Call Timer - show when call is connected */}
+        {isCallActive && callState === "connected" && activeElapsed > 0 && (
+          <div className="mb-6">
+            <div className="text-sm text-gray-500 mb-1">Call duration</div>
+            <div className="text-lg font-mono text-green-600">
+              {formatTime(activeElapsed)}
+            </div>
           </div>
         )}
+
+        {/* Fallback: Show original call duration if available and no timer is active */}
+        {isCallActive &&
+          callDuration > 0 &&
+          callState !== "connected" &&
+          activeElapsed === 0 && (
+            <div className="mb-6 text-lg font-mono text-gray-700">
+              {Math.floor(callDuration / 60)}:
+              {(callDuration % 60).toString().padStart(2, "0")}
+            </div>
+          )}
       </div>
 
       {/* Hang Up Button */}
