@@ -443,7 +443,10 @@ export const useDialer = (telnyxActions: {
         telnyxActions.error.includes("User hung up") ||
         telnyxActions.error.includes("Message left") ||
         telnyxActions.error.includes("Call rejected") ||
-        telnyxActions.error.includes("declined");
+        telnyxActions.error.includes("declined") ||
+        telnyxActions.error.includes("Call declined") ||
+        telnyxActions.error.includes("Call failed") ||
+        telnyxActions.error.includes("Network connection issue");
 
       console.log("🔍 useDialer - Is call failure:", isCallFailure);
 
