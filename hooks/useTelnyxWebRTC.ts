@@ -145,6 +145,9 @@ export const useTelnyxWebRTC = (
   const [callState, setCallState] = useState<CallState>("idle");
   const [callControlId, setCallControlId] = useState<string | null>(null);
   const [callStartTime, setCallStartTime] = useState<number | null>(null);
+  const [callConnectedTime, setCallConnectedTime] = useState<number | null>(
+    null
+  );
   const [currentDialedNumber, setCurrentDialedNumber] = useState<string | null>(
     null
   );
@@ -279,6 +282,7 @@ export const useTelnyxWebRTC = (
           setCurrentCall(null);
           setCallControlId(null);
           setCallStartTime(null);
+          setCallConnectedTime(null);
           setWasCallConnected(false);
           setTrackedCallIds(new Set()); // Clear tracked call IDs
           // FIXED: Don't clear error when transitioning to idle if it's a call failure
@@ -323,6 +327,8 @@ export const useTelnyxWebRTC = (
           if (!callStartTime) {
             setCallStartTime(Date.now());
           }
+          // Track when call actually became connected for accurate duration calculation
+          setCallConnectedTime(Date.now());
 
           // CRITICAL: Ensure audio context is active for bidirectional communication
           try {
@@ -345,6 +351,8 @@ export const useTelnyxWebRTC = (
           if (!callStartTime) {
             setCallStartTime(Date.now());
           }
+          // Track when call actually became connected (voicemail is also a connection)
+          setCallConnectedTime(Date.now());
           break;
         case "ended":
           setIsConnecting(false);
@@ -352,6 +360,7 @@ export const useTelnyxWebRTC = (
           setCurrentCall(null);
           setCallControlId(null);
           setCallStartTime(null);
+          setCallConnectedTime(null);
           setCurrentDialedNumber(null);
           setError(null);
           // Don't reset wasCallConnected here - we need it for cleanup logic
@@ -371,6 +380,7 @@ export const useTelnyxWebRTC = (
               setCurrentCall(null);
               setCallControlId(null);
               setCallStartTime(null);
+              setCallConnectedTime(null);
               setCurrentDialedNumber(null);
               setError(null);
               currentCallStateRef.current = "idle";
@@ -1065,7 +1075,10 @@ export const useTelnyxWebRTC = (
   // REWRITTEN CALL EVENT HANDLERS
   const performCallCleanup = useCallback(
     (call: any, phoneNumber: string) => {
-      const duration = callStartTime
+      // Use connected time for duration calculation if call was connected, otherwise use start time
+      const duration = callConnectedTime
+        ? Math.floor((Date.now() - callConnectedTime) / 1000)
+        : callStartTime
         ? Math.floor((Date.now() - callStartTime) / 1000)
         : 0;
 
@@ -1197,11 +1210,13 @@ export const useTelnyxWebRTC = (
       setCurrentCall(null);
       setCallControlId(null);
       setCallStartTime(null);
+      setCallConnectedTime(null);
       setCurrentDialedNumber(null);
       setWasCallConnected(false);
     },
     [
       callStartTime,
+      callConnectedTime,
       callState,
       wasCallConnected,
       error,
@@ -1216,7 +1231,10 @@ export const useTelnyxWebRTC = (
 
   const handleCallDestroy = useCallback(
     (call: any, phoneNumber: string) => {
-      const duration = callStartTime
+      // Use connected time for duration calculation if call was connected, otherwise use start time
+      const duration = callConnectedTime
+        ? Math.floor((Date.now() - callConnectedTime) / 1000)
+        : callStartTime
         ? Math.floor((Date.now() - callStartTime) / 1000)
         : 0;
 
@@ -1268,16 +1286,26 @@ export const useTelnyxWebRTC = (
       setCurrentCall(null);
       setCallControlId(null);
       setCallStartTime(null);
+      setCallConnectedTime(null);
       setCurrentDialedNumber(null);
       setWasCallConnected(false);
     },
-    [callStartTime, transitionCallState, trackCall, notifyCallStatus]
+    [
+      callStartTime,
+      callConnectedTime,
+      transitionCallState,
+      trackCall,
+      notifyCallStatus,
+    ]
   );
 
   const handleCallFailed = useCallback(
     (call: any, phoneNumber: string) => {
       try {
-        const duration = callStartTime
+        // Use connected time for duration calculation if call was connected, otherwise use start time
+        const duration = callConnectedTime
+          ? Math.floor((Date.now() - callConnectedTime) / 1000)
+          : callStartTime
           ? Math.floor((Date.now() - callStartTime) / 1000)
           : 0;
 
@@ -1307,6 +1335,7 @@ export const useTelnyxWebRTC = (
         setCurrentCall(null);
         setCallControlId(null);
         setCallStartTime(null);
+        setCallConnectedTime(null);
         setCurrentDialedNumber(null);
         setWasCallConnected(false);
       } catch (error) {
@@ -1315,12 +1344,20 @@ export const useTelnyxWebRTC = (
         setCurrentCall(null);
         setCallControlId(null);
         setCallStartTime(null);
+        setCallConnectedTime(null);
         setCurrentDialedNumber(null);
         setWasCallConnected(false);
         setError("Call failed - Unable to connect");
       }
     },
-    [callStartTime, transitionCallState, trackCall, notifyCallStatus, error]
+    [
+      callStartTime,
+      callConnectedTime,
+      transitionCallState,
+      trackCall,
+      notifyCallStatus,
+      error,
+    ]
   );
 
   // ============================================================================
@@ -1515,6 +1552,7 @@ export const useTelnyxWebRTC = (
         setCurrentCall(null);
         setCallControlId(null);
         setCallStartTime(null);
+        setCallConnectedTime(null);
         setCurrentDialedNumber(null);
         setWasCallConnected(false);
         setError(null);
@@ -1706,6 +1744,7 @@ export const useTelnyxWebRTC = (
     setCurrentCall(null);
     setCallControlId(null);
     setCallStartTime(null);
+    setCallConnectedTime(null);
     setCurrentDialedNumber(null);
     setWasCallConnected(false);
     setTrackedCallIds(new Set()); // Clear tracked call IDs
@@ -1727,6 +1766,7 @@ export const useTelnyxWebRTC = (
       setCurrentCall(null);
       setCallControlId(null);
       setCallStartTime(null);
+      setCallConnectedTime(null);
       setCurrentDialedNumber(null);
       setWasCallConnected(false);
     } catch (error) {
@@ -1735,6 +1775,7 @@ export const useTelnyxWebRTC = (
       setCurrentCall(null);
       setCallControlId(null);
       setCallStartTime(null);
+      setCallConnectedTime(null);
       setCurrentDialedNumber(null);
       setWasCallConnected(false);
     }
