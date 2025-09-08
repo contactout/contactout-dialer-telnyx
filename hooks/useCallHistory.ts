@@ -13,6 +13,24 @@ export interface CallRecord {
   total_cost?: number;
   currency?: string;
   destination_country?: string;
+
+  // Enhanced fields for native Telnyx events
+  hangup_cause?: string;
+  hangup_source?: string;
+  call_start_time?: string;
+  call_connected_time?: string;
+  call_end_time?: string;
+  telnyx_call_id?: string;
+  telnyx_leg_id?: string;
+  call_quality_score?: number;
+  network_quality?: string;
+  voice_mail_detected?: boolean;
+  machine_answer?: boolean;
+  amd_result?: string;
+  sip_response_code?: number;
+  sip_response_text?: string;
+  error_code?: string;
+  error_message?: string;
 }
 
 export const useCallHistory = () => {

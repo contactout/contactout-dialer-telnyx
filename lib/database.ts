@@ -14,6 +14,24 @@ export interface CallRecord {
   total_cost?: number;
   currency?: string;
   destination_country?: string;
+
+  // Enhanced fields for native Telnyx events
+  hangup_cause?: string; // 'call_rejected', 'busy', 'no_answer', 'normal_clearing', etc.
+  hangup_source?: string; // 'caller', 'callee', 'system'
+  call_start_time?: Date;
+  call_connected_time?: Date;
+  call_end_time?: Date;
+  telnyx_call_id?: string;
+  telnyx_leg_id?: string;
+  call_quality_score?: number;
+  network_quality?: string; // 'excellent', 'good', 'fair', 'poor'
+  voice_mail_detected?: boolean;
+  machine_answer?: boolean;
+  amd_result?: string; // 'human', 'machine', 'not_sure'
+  sip_response_code?: number;
+  sip_response_text?: string;
+  error_code?: string;
+  error_message?: string;
 }
 
 export interface UserStats {
@@ -309,7 +327,7 @@ export class DatabaseService {
     }
   }
 
-  // Track a new call
+  // Enhanced trackCall method with native Telnyx event data
   static async trackCall(
     callData: Omit<CallRecord, "id" | "timestamp">
   ): Promise<void> {
@@ -371,6 +389,24 @@ export class DatabaseService {
           total_cost: totalCost,
           currency: "USD",
           destination_country: destinationCountry,
+
+          // Enhanced native Telnyx event data
+          hangup_cause: callData.hangup_cause,
+          hangup_source: callData.hangup_source,
+          call_start_time: callData.call_start_time?.toISOString(),
+          call_connected_time: callData.call_connected_time?.toISOString(),
+          call_end_time: callData.call_end_time?.toISOString(),
+          telnyx_call_id: callData.telnyx_call_id,
+          telnyx_leg_id: callData.telnyx_leg_id,
+          call_quality_score: callData.call_quality_score,
+          network_quality: callData.network_quality,
+          voice_mail_detected: callData.voice_mail_detected,
+          machine_answer: callData.machine_answer,
+          amd_result: callData.amd_result,
+          sip_response_code: callData.sip_response_code,
+          sip_response_text: callData.sip_response_text,
+          error_code: callData.error_code,
+          error_message: callData.error_message,
         });
 
         if (error) throw error;
