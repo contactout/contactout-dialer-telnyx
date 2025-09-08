@@ -866,7 +866,6 @@ export const useTelnyxWebRTC = (
             `📞 Telnyx notification: ${notification.type}`,
             notification
           );
-
           telnyxClient.lastNotificationTime = now;
         }
 
@@ -966,18 +965,8 @@ export const useTelnyxWebRTC = (
                     : 0;
 
                   // Use native Telnyx hangup events instead of manual detection
-                  // Check multiple possible property names for hangup cause
-                  const hangupCause =
-                    call.hangup_cause ||
-                    call.cause ||
-                    call.causeCode ||
-                    call.reason ||
-                    call.hangupReason;
-                  const hangupSource =
-                    call.hangup_source ||
-                    call.source ||
-                    call.hangupSource ||
-                    call.origin;
+                  const hangupCause = call.hangup_cause || call.reason;
+                  const hangupSource = call.hangup_source || call.source;
 
                   console.log("📞 Native Telnyx hangup event:", {
                     hangup_cause: hangupCause,
@@ -1002,8 +991,7 @@ export const useTelnyxWebRTC = (
                     }
                   } else if (
                     hangupCause === "busy" ||
-                    hangupCause === "user_busy" ||
-                    hangupCause === "USER_BUSY"
+                    hangupCause === "user_busy"
                   ) {
                     if (hangupSource === "callee") {
                       setError(
@@ -1050,7 +1038,6 @@ export const useTelnyxWebRTC = (
                     }
                   }
 
-                  // Process call cleanup with available event data
                   performCallCleanup(call, currentDialedNumber || "", {
                     hangup_cause: hangupCause,
                     hangup_source: hangupSource,
