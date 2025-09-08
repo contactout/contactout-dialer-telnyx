@@ -975,36 +975,55 @@ export const useTelnyxWebRTC = (
                     call_state: currentCallStateRef.current,
                   });
 
-                  // Set appropriate error message based on native Telnyx hangup cause
+                  // Set appropriate error message based on native Telnyx hangup cause and source
                   if (
                     hangupCause === "call_rejected" ||
                     hangupCause === "rejected"
                   ) {
-                    setError(
-                      "Call rejected - The other party declined the call"
-                    );
-                  } else if (hangupCause === "busy") {
-                    setError("Call failed - Number is busy");
+                    if (hangupSource === "callee") {
+                      setError(
+                        "Call declined - The person you called declined the call"
+                      );
+                    } else {
+                      setError(
+                        "Call rejected - The other party declined the call"
+                      );
+                    }
+                  } else if (
+                    hangupCause === "busy" ||
+                    hangupCause === "user_busy"
+                  ) {
+                    if (hangupSource === "callee") {
+                      setError(
+                        "Call failed - The person you called is currently on another call"
+                      );
+                    } else {
+                      setError("Call failed - Number is busy");
+                    }
                   } else if (
                     hangupCause === "no_answer" ||
                     hangupCause === "no-answer"
                   ) {
-                    setError("Call failed - No answer");
-                  } else if (
-                    hangupCause === "normal_clearing" &&
-                    hangupSource === "callee"
-                  ) {
-                    setError("Call completed - The other party hung up");
-                  } else if (
-                    hangupCause === "normal_clearing" &&
-                    hangupSource === "caller"
-                  ) {
-                    // User hung up - no error message needed
-                    setError(null);
+                    if (hangupSource === "callee") {
+                      setError("Call failed - No one answered the call");
+                    } else {
+                      setError("Call failed - No answer");
+                    }
+                  } else if (hangupCause === "normal_clearing") {
+                    if (hangupSource === "callee") {
+                      setError("Call completed - The other party hung up");
+                    } else if (hangupSource === "caller") {
+                      // User hung up - no error message needed
+                      setError(null);
+                    } else {
+                      setError("Call completed");
+                    }
                   } else if (hangupCause === "unallocated_number") {
                     setError("Call failed - Invalid phone number");
-                  } else if (hangupCause === "user_busy") {
-                    setError("Call failed - Number is busy");
+                  } else if (hangupCause === "network_error") {
+                    setError("Call failed - Network connection issue");
+                  } else if (hangupCause === "timeout") {
+                    setError("Call failed - Connection timeout");
                   } else {
                     // Fallback for unknown hangup causes
                     if (
