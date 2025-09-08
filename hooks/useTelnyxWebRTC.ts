@@ -148,6 +148,7 @@ export const useTelnyxWebRTC = (
   const [currentDialedNumber, setCurrentDialedNumber] = useState<string | null>(
     null
   );
+  const [wasCallConnected, setWasCallConnected] = useState<boolean>(false);
 
   // Use ref to track current call state to avoid stale closures in monitor
   const currentCallStateRef = useRef<CallState>(callState);
@@ -277,6 +278,7 @@ export const useTelnyxWebRTC = (
           setCurrentCall(null);
           setCallControlId(null);
           setCallStartTime(null);
+          setWasCallConnected(false);
           // FIXED: Don't clear error when transitioning to idle if it's a call failure
           // This allows error popups to be displayed for rejected calls
           setError((currentError) => {
@@ -315,6 +317,7 @@ export const useTelnyxWebRTC = (
           setIsCallActive(true);
           setCurrentCall(call);
           setError(null);
+          setWasCallConnected(true);
           if (!callStartTime) {
             setCallStartTime(Date.now());
           }
@@ -349,6 +352,7 @@ export const useTelnyxWebRTC = (
           setCallStartTime(null);
           setCurrentDialedNumber(null);
           setError(null);
+          // Don't reset wasCallConnected here - we need it for cleanup logic
           // FIXED: Prevent recursive calls by using direct state update instead of transitionCallState
           const transitionTimeout = setTimeout(() => {
             try {
@@ -1064,10 +1068,18 @@ export const useTelnyxWebRTC = (
         const hangupError = call?.error || "";
 
         // Detect call rejection scenarios
-        if (callState === "ringing" && duration < 10) {
-          // Call was rejected while ringing (went from early to hangup quickly)
+        if (callState === "ringing" && duration < 10 && !wasCallConnected) {
+          // Call was rejected while ringing (went from early to hangup quickly) and never connected
           callStatus = "failed";
           errorMessage = "Call rejected - The other party declined the call";
+        } else if (
+          callState === "ringing" &&
+          duration < 10 &&
+          wasCallConnected
+        ) {
+          // Call was answered but hung up quickly by the other party
+          callStatus = "completed";
+          errorMessage = "Call completed - The other party hung up";
         } else if (duration < 2) {
           // Very short call - likely invalid number or immediate rejection
           callStatus = "failed";
@@ -1161,10 +1173,12 @@ export const useTelnyxWebRTC = (
       setCallControlId(null);
       setCallStartTime(null);
       setCurrentDialedNumber(null);
+      setWasCallConnected(false);
     },
     [
       callStartTime,
       callState,
+      wasCallConnected,
       error,
       transitionCallState,
       trackCall,
@@ -1230,6 +1244,7 @@ export const useTelnyxWebRTC = (
       setCallControlId(null);
       setCallStartTime(null);
       setCurrentDialedNumber(null);
+      setWasCallConnected(false);
     },
     [callStartTime, transitionCallState, trackCall, notifyCallStatus]
   );
@@ -1268,6 +1283,7 @@ export const useTelnyxWebRTC = (
         setCallControlId(null);
         setCallStartTime(null);
         setCurrentDialedNumber(null);
+        setWasCallConnected(false);
       } catch (error) {
         console.error("🚨 Error in handleCallFailed:", error);
         // Fallback cleanup
@@ -1275,6 +1291,7 @@ export const useTelnyxWebRTC = (
         setCallControlId(null);
         setCallStartTime(null);
         setCurrentDialedNumber(null);
+        setWasCallConnected(false);
         setError("Call failed - Unable to connect");
       }
     },
@@ -1474,6 +1491,7 @@ export const useTelnyxWebRTC = (
         setCallControlId(null);
         setCallStartTime(null);
         setCurrentDialedNumber(null);
+        setWasCallConnected(false);
         setError(null);
         currentCallStateRef.current = "idle";
       }
@@ -1664,6 +1682,7 @@ export const useTelnyxWebRTC = (
     setCallControlId(null);
     setCallStartTime(null);
     setCurrentDialedNumber(null);
+    setWasCallConnected(false);
     setError(null);
 
     // Update ref immediately
@@ -1683,6 +1702,7 @@ export const useTelnyxWebRTC = (
       setCallControlId(null);
       setCallStartTime(null);
       setCurrentDialedNumber(null);
+      setWasCallConnected(false);
     } catch (error) {
       // Error in completeCallFailure
       // Fallback cleanup
@@ -1690,6 +1710,7 @@ export const useTelnyxWebRTC = (
       setCallControlId(null);
       setCallStartTime(null);
       setCurrentDialedNumber(null);
+      setWasCallConnected(false);
     }
   }, [transitionCallState]);
 
