@@ -143,6 +143,27 @@ export class DatabaseService {
     }
   }
 
+  // Update only the last_active field for a user
+  static async updateLastActiveOnly(userId: string): Promise<void> {
+    try {
+      const now = new Date().toISOString();
+      const { error } = await supabase
+        .from("users")
+        .update({ last_active: now })
+        .eq("id", userId);
+
+      if (error) {
+        console.error("Error updating last_active only:", error);
+        // Don't throw - this shouldn't break the app
+      } else {
+        console.log(`Updated last_active for user ${userId}`);
+      }
+    } catch (error) {
+      console.error("Error in updateLastActiveOnly:", error);
+      // Don't throw - this shouldn't break the app
+    }
+  }
+
   // Set user as admin
   static async setUserAsAdmin(userId: string): Promise<void> {
     try {

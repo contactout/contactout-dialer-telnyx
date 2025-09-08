@@ -123,12 +123,38 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setSessionTimeout(timeout);
   }, [sessionTimeout]);
 
+  // Helper function to check if last_active should be updated today
+  const shouldUpdateLastActiveToday = useCallback((userId: string): boolean => {
+    try {
+      const today = new Date().toDateString(); // e.g., "Mon Dec 16 2024"
+      const lastUpdateKey = `lastActiveUpdate_${userId}`;
+      const lastUpdateDate = localStorage.getItem(lastUpdateKey);
+
+      if (lastUpdateDate !== today) {
+        localStorage.setItem(lastUpdateKey, today);
+        return true;
+      }
+      return false;
+    } catch (error) {
+      console.error("Error checking last_active update date:", error);
+      return false; // Fail safely - don't update if localStorage fails
+    }
+  }, []);
+
   // Activity tracking
   const trackUserActivity = useCallback(() => {
     if (user) {
-      resetSessionTimeout();
+      resetSessionTimeout(); // Keep existing functionality
+
+      // Add daily last_active update
+      if (shouldUpdateLastActiveToday(user.id)) {
+        DatabaseService.updateLastActiveOnly(user.id).catch((error) => {
+          console.error("Failed to update last_active:", error);
+          // Don't break the app if this fails
+        });
+      }
     }
-  }, [user, resetSessionTimeout]);
+  }, [user, resetSessionTimeout, shouldUpdateLastActiveToday]);
 
   useEffect(() => {
     // Set up loading timeout to prevent stuck loading screens
