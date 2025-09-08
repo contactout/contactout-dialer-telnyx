@@ -149,6 +149,7 @@ export const useTelnyxWebRTC = (
     null
   );
   const [wasCallConnected, setWasCallConnected] = useState<boolean>(false);
+  const [trackedCallIds, setTrackedCallIds] = useState<Set<string>>(new Set());
 
   // Use ref to track current call state to avoid stale closures in monitor
   const currentCallStateRef = useRef<CallState>(callState);
@@ -279,6 +280,7 @@ export const useTelnyxWebRTC = (
           setCallControlId(null);
           setCallStartTime(null);
           setWasCallConnected(false);
+          setTrackedCallIds(new Set()); // Clear tracked call IDs
           // FIXED: Don't clear error when transitioning to idle if it's a call failure
           // This allows error popups to be displayed for rejected calls
           setError((currentError) => {
@@ -683,18 +685,41 @@ export const useTelnyxWebRTC = (
         return;
       }
 
+      // Create a unique identifier for this call attempt
+      const callId =
+        call.id || call.call_control_id || `${phoneNumber}-${callStartTime}`;
+
+      // Check if this call has already been tracked
+      if (trackedCallIds.has(callId)) {
+        console.log(
+          `📞 Call ${callId} already tracked, skipping duplicate entry`
+        );
+        return;
+      }
+
+      // Mark this call as tracked
+      setTrackedCallIds((prev) => new Set(prev).add(callId));
+
+      console.log(`📞 Tracking call ${callId} with status: ${status}`);
+
       // Call tracking to database
       DatabaseService.trackCall({
         user_id: userId,
         phone_number: phoneNumber,
         status,
-        call_control_id: call.id || call.call_control_id, // Use call.id as fallback
+        call_control_id: callId,
         duration,
       }).catch((error) => {
-        // DatabaseService.trackCall failed
+        console.error("DatabaseService.trackCall failed:", error);
+        // Remove from tracked set if database call failed
+        setTrackedCallIds((prev) => {
+          const newSet = new Set(prev);
+          newSet.delete(callId);
+          return newSet;
+        });
       });
     },
-    [userId, currentDialedNumber, currentCall]
+    [userId, currentDialedNumber, currentCall, callStartTime]
   );
 
   const notifyCallStatus = useCallback(
@@ -1683,6 +1708,7 @@ export const useTelnyxWebRTC = (
     setCallStartTime(null);
     setCurrentDialedNumber(null);
     setWasCallConnected(false);
+    setTrackedCallIds(new Set()); // Clear tracked call IDs
     setError(null);
 
     // Update ref immediately
