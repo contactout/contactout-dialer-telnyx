@@ -270,10 +270,19 @@ export const useDialer = (telnyxActions: {
       return;
     }
 
-    // Additional check to prevent calls when in any non-idle state
-    if (telnyxActions.callState !== "idle") {
+    // IMPROVED: Allow calls when in ended state (which should auto-transition to idle)
+    if (
+      telnyxActions.callState !== "idle" &&
+      telnyxActions.callState !== "ended"
+    ) {
       setErrorMessageAction("Please wait for current call to complete");
       return;
+    }
+
+    // ADDITIONAL: If stuck in ended state, force transition to idle
+    if (telnyxActions.callState === "ended") {
+      console.log("🔄 Detected ended state, forcing reset before new call");
+      telnyxActions.forceResetCallState();
     }
 
     if (!telnyxActions.hasMicrophoneAccess) {
@@ -416,6 +425,11 @@ export const useDialer = (telnyxActions: {
   // Effects - placed after all actions are defined to avoid circular dependencies
   useEffect(() => {
     if (telnyxActions.error) {
+      console.log("🔍 useDialer - Error received:", telnyxActions.error);
+      console.log("🔍 useDialer - Call state:", telnyxActions.callState);
+      console.log("🔍 useDialer - Is connecting:", telnyxActions.isConnecting);
+      console.log("🔍 useDialer - Is call active:", telnyxActions.isCallActive);
+
       // CRITICAL FIX: More conservative error handling
       // Only show error popup for actual call failures, not during active calls
       const isCallFailure =
@@ -431,13 +445,16 @@ export const useDialer = (telnyxActions: {
         telnyxActions.error.includes("Call rejected") ||
         telnyxActions.error.includes("declined");
 
-      // CRITICAL FIX: Don't show error popup during active calls unless it's a real failure
-      if (isCallFailure && !telnyxActions.isCallActive) {
-        // For call failures when not in active call, show error popup and redirect to dialpad
+      console.log("🔍 useDialer - Is call failure:", isCallFailure);
+
+      // CRITICAL FIX: Show error popup for call failures, including rejections
+      if (isCallFailure) {
+        console.log("🔍 useDialer - Showing error popup:", telnyxActions.error);
+        // For call failures (including rejections), always show error popup
         showError(telnyxActions.error);
 
-        // Only force reset if we're still in a call state
-        if (telnyxActions.isConnecting) {
+        // Force reset if we're still in a call state
+        if (telnyxActions.isConnecting || telnyxActions.isCallActive) {
           telnyxActions.forceResetCallState();
         }
       } else if (telnyxActions.isConnecting && !telnyxActions.isCallActive) {

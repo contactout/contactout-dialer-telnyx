@@ -146,6 +146,48 @@ npm test -- call-flow.test.ts
 
 **Solution**: Check the timeout logic and ensure proper cleanup in `transitionCallState`.
 
+### Issue: "Cannot make new calls after hanging up"
+
+**Solution**: This was caused by overly restrictive call blocking logic. The fix allows calls when in "ended" state and forces immediate state reset if stuck.
+
+### Issue: "UI remains in connecting state after call ends"
+
+**Solution**: Enhanced the "ended" → "idle" transition with robust error handling and timeout management to prevent stuck states.
+
+### Issue: "UI stuck in connecting state even when call is ringing"
+
+**Solution**: The root cause was using incorrect event listeners. Fixed by implementing proper `telnyx.notification` event handler as per Telnyx documentation, which handles all call state changes through the centralized notification system.
+
+### Issue: "Auto-redial after call rejection"
+
+**Solution**: This was caused by missing hangup event handling. Fixed by properly implementing `telnyx.notification` events to detect `hangup` and `destroy` states, ensuring proper call completion and preventing auto-redial.
+
+### Issue: "Infinite console logging after call ends"
+
+**Problem**: After a call ends, the console logs continuously, causing the Chrome tab to freeze and the console to black out. This was accompanied by a `RangeError: Maximum call stack size exceeded` error.
+
+**Root Cause**: The primary cause was a recursive call to `call.hangup()` within the `handleCallHangup` function. When the `telnyx.notification` handler received a `hangup` notification, it called `handleCallHangup`, which then called `call.hangup()`, which triggered another `hangup` notification, creating an infinite loop.
+
+**Solution**:
+
+1. **CRITICAL FIX**: Refactored `handleCallHangup` to `performCallCleanup` and removed the recursive `call.hangup()` call that was causing the infinite loop
+2. Removed problematic `ended → ringing` state transition from `validTransitions`
+3. Added comprehensive logging guards to prevent rapid console output:
+   - Notification handler logging guard (200ms minimum)
+   - Call state update logging guard (300ms minimum)
+   - State transition logging guard (250ms minimum)
+   - Enhanced transition state logging guard (150ms minimum with duplicate detection)
+4. Prevented recursive `transitionCallState` calls by using direct state updates
+5. Updated the `telnyx.notification` handler to call `performCallCleanup` instead of `handleCallHangup`
+
+### Issue: "No notification when call is rejected"
+
+**Solution**:
+
+1. Added detection logic to identify rejected calls (short duration while ringing) and display appropriate error message: "Call rejected - The other party declined the call"
+2. Fixed error popup logic in `useDialer.ts` to ensure rejection notifications are always shown, regardless of call state
+3. Enhanced error handling to force state reset when call rejections occur
+
 ## Development Guidelines
 
 ### When Making Changes to Call Flow:
