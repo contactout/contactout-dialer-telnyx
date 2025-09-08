@@ -90,3 +90,34 @@ body {
     box-shadow: 0 25px 50px -12px rgba(0, 0, 0, 0.25);
   }
 }
+
+/* Audio bar animations for iPhone-style calling screen */
+@keyframes audioBar1 {
+  0%,
+  100% {
+    height: 0.5rem;
+  }
+  50% {
+    height: 1.5rem;
+  }
+}
+
+@keyframes audioBar2 {
+  0%,
+  100% {
+    height: 0.5rem;
+  }
+  50% {
+    height: 2rem;
+  }
+}
+
+@keyframes audioBar3 {
+  0%,
+  100% {
+    height: 0.5rem;
+  }
+  50% {
+    height: 1rem;
+  }
+}

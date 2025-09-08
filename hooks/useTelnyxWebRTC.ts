@@ -62,6 +62,7 @@ interface UseTelnyxWebRTCReturn {
   isConnecting: boolean;
   callState: CallState;
   callControlId: string | null;
+  currentCall: any;
 
   // Audio state
   hasMicrophoneAccess: boolean;
@@ -1220,8 +1221,10 @@ export const useTelnyxWebRTC = (
         (hangupSource === "caller" || hangupSource === "callee")
       ) {
         callStatus = "completed";
+      } else {
+        // Default to failed for unknown cases to avoid false positives
+        callStatus = "failed";
       }
-      // Default to completed for unknown cases
 
       // Set error if call failed or voice mail (but only if not already set)
       if (callStatus === "failed" || callStatus === "voicemail") {
@@ -1902,6 +1905,7 @@ export const useTelnyxWebRTC = (
     isConnecting,
     callState,
     callControlId,
+    currentCall,
 
     // Audio state
     hasMicrophoneAccess,

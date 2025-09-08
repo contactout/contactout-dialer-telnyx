@@ -1,6 +1,7 @@
 import React, { useEffect } from "react";
 import { useCallAudio } from "@/hooks/useCallAudio";
 import { useCallTimer } from "@/hooks/useCallTimer";
+import { useRemoteAudioLevel } from "@/hooks/useRemoteAudioLevel";
 import { detectCountry, formatPhoneNumber } from "@/lib/phoneNumberUtils";
 
 interface CallingScreenProps {
@@ -14,6 +15,7 @@ interface CallingScreenProps {
   callState?: string;
   callDuration?: number;
   autoRedirectCountdown?: number | null;
+  currentCall?: any;
 }
 
 const CallingScreen: React.FC<CallingScreenProps> = ({
@@ -27,6 +29,7 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   callState = "",
   callDuration = 0,
   autoRedirectCountdown,
+  currentCall,
 }) => {
   // Use the comprehensive audio hook
   const { playCallAudio, stopAllAudio, initializeAudioContext } = useCallAudio({
@@ -48,6 +51,12 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
     resetTimers,
     formatTime,
   } = useCallTimer();
+
+  // Use the remote audio level hook for visual feedback
+  const { audioLevel, isSpeaking } = useRemoteAudioLevel(
+    currentCall,
+    isCallActive
+  );
 
   // Initialize audio context
   useEffect(() => {
@@ -163,24 +172,23 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
     resetTimers,
   ]);
 
-  // Get simplified status text
-  const getStatusText = () => {
-    if (error) return error;
+  // Get call state for visual styling
+  const getCallStateInfo = () => {
+    if (error) return { color: "red", animation: "none", text: error };
     if (isCallActive) {
-      if (callState === "voicemail") return "Voice Mail - Leave a message";
-      if (callState === "connected") return "Call Active";
-      return "Call in progress";
+      if (callState === "voicemail")
+        return { color: "orange", animation: "none", text: "Voice Mail" };
+      if (callState === "connected")
+        return { color: "green", animation: "none", text: "" };
+      return { color: "green", animation: "none", text: "" };
     }
     if (isConnecting) {
-      if (callState === "requesting") return "Requesting...";
-      if (callState === "trying") return "Connecting...";
-      if (callState === "ringing") return "Ringing...";
-      if (callState === "early") return "Ringing...";
-      if (callState === "answered") return "Call Connected";
-      return "Connecting...";
+      return { color: "blue", animation: "pulse", text: "" };
     }
-    return "Call ended";
+    return { color: "gray", animation: "none", text: "" };
   };
+
+  const callStateInfo = getCallStateInfo();
 
   return (
     <div className="w-full max-w-sm mx-auto text-center flex flex-col justify-center min-h-[600px]">
@@ -217,92 +225,134 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
         </div>
       )}
 
-      {/* Main Call Display */}
+      {/* Main Call Display - iPhone Style */}
       <div className="mb-8">
-        {/* Phone Icon with Animation */}
-        <div className="w-20 h-20 bg-blue-500 rounded-full mx-auto mb-4 flex items-center justify-center relative">
-          <svg
-            className="w-10 h-10 text-white"
-            fill="currentColor"
-            viewBox="0 0 20 20"
-          >
-            <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
-          </svg>
-
-          {/* Simple pulsing animation only when connecting */}
-          {isConnecting && !error && (
-            <div className="absolute inset-0 w-20 h-20 bg-blue-500 rounded-full opacity-30 animate-ping"></div>
-          )}
+        {/* Contact Avatar (Country Flag) */}
+        <div className="mb-8">
+          {(() => {
+            const country = detectCountry(phoneNumber);
+            if (country) {
+              return (
+                <div className="w-24 h-24 bg-gray-100 rounded-full mx-auto flex items-center justify-center text-4xl shadow-sm">
+                  {country.flag}
+                </div>
+              );
+            }
+            return (
+              <div className="w-24 h-24 bg-gray-200 rounded-full mx-auto flex items-center justify-center">
+                <svg
+                  className="w-12 h-12 text-gray-400"
+                  fill="currentColor"
+                  viewBox="0 0 20 20"
+                >
+                  <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+                </svg>
+              </div>
+            );
+          })()}
         </div>
 
-        {/* Phone Number */}
-        <div className="mb-6">
-          <div className="text-2xl font-mono text-gray-800 flex items-center justify-center space-x-2">
-            {/* Country Flag */}
-            {(() => {
-              const country = detectCountry(phoneNumber);
-              if (country) {
-                return (
-                  <span className="text-3xl" title={country.name}>
-                    {country.flag}
-                  </span>
-                );
-              }
-              return null;
-            })()}
-            {/* Formatted Phone Number */}
-            <span>{formatPhoneNumber(phoneNumber) || phoneNumber}</span>
+        {/* Phone Number - Hero Element */}
+        <div className="mb-8">
+          <div className="text-3xl font-light text-gray-900 tracking-wide">
+            {formatPhoneNumber(phoneNumber) || phoneNumber}
           </div>
         </div>
 
-        {/* Status Text */}
-        <div className="mb-6 text-sm text-gray-600">{getStatusText()}</div>
+        {/* Call State Visual Indicator */}
+        <div className="mb-8">
+          <div
+            className={`w-16 h-16 rounded-full mx-auto flex items-center justify-center relative ${
+              callStateInfo.color === "red"
+                ? "bg-red-500"
+                : callStateInfo.color === "green"
+                ? "bg-green-500"
+                : callStateInfo.color === "orange"
+                ? "bg-orange-500"
+                : "bg-blue-500"
+            }`}
+          >
+            <svg
+              className="w-8 h-8 text-white"
+              fill="currentColor"
+              viewBox="0 0 20 20"
+            >
+              <path d="M2 3a1 1 0 011-1h2.153a1 1 0 01.986.836l.74 4.435a1 1 0 01-.54 1.06l-1.548.773a11.037 11.037 0 006.105 6.105l.774-1.548a1 1 0 011.059-.54l4.435.74a1 1 0 01.836.986V17a1 1 0 01-1 1h-2C7.82 18 2 12.18 2 5V3z" />
+            </svg>
 
-        {/* Ringing Timer - show when call is ringing */}
-        {isConnecting &&
-          (callState === "ringing" || callState === "early") &&
-          ringingElapsed > 0 && (
-            <div className="mb-6">
-              <div className="text-sm text-gray-500 mb-1">Ringing for</div>
-              <div className="text-lg font-mono text-blue-600">
-                {formatTime(ringingElapsed)}
-              </div>
-            </div>
-          )}
+            {/* Pulsing animation for connecting/ringing */}
+            {callStateInfo.animation === "pulse" && (
+              <div
+                className={`absolute inset-0 w-16 h-16 rounded-full opacity-30 animate-ping ${
+                  callStateInfo.color === "blue" ? "bg-blue-500" : "bg-current"
+                }`}
+              ></div>
+            )}
+          </div>
+        </div>
 
-        {/* Active Call Timer - show when call is connected */}
+        {/* Call Duration - Only show when connected */}
         {isCallActive && callState === "connected" && activeElapsed > 0 && (
-          <div className="mb-6">
-            <div className="text-sm text-gray-500 mb-1">Call duration</div>
-            <div className="text-lg font-mono text-green-600">
+          <div className="mb-8">
+            <div className="text-2xl font-light text-gray-600">
               {formatTime(activeElapsed)}
             </div>
           </div>
         )}
 
-        {/* Fallback: Show original call duration if available and no timer is active */}
-        {isCallActive &&
-          callDuration > 0 &&
-          callState !== "connected" &&
-          activeElapsed === 0 && (
-            <div className="mb-6 text-lg font-mono text-gray-700">
-              {Math.floor(callDuration / 60)}:
-              {(callDuration % 60).toString().padStart(2, "0")}
+        {/* Minimal Status Text - Only for errors or voice mail */}
+        {callStateInfo.text && (
+          <div className="mb-6">
+            <div
+              className={`text-sm font-medium ${
+                callStateInfo.color === "red"
+                  ? "text-red-600"
+                  : callStateInfo.color === "orange"
+                  ? "text-orange-600"
+                  : "text-gray-600"
+              }`}
+            >
+              {callStateInfo.text}
             </div>
-          )}
+          </div>
+        )}
+
+        {/* Subtle Remote Speaker Indicator */}
+        {isCallActive && (
+          <div className="mb-6 flex items-center justify-center">
+            <div className="flex items-center space-x-2">
+              <div className="flex space-x-1">
+                {[1, 2, 3].map((bar) => (
+                  <div
+                    key={bar}
+                    className={`w-1 h-4 rounded-full transition-all duration-200 ${
+                      isSpeaking ? "bg-green-500" : "bg-gray-300"
+                    }`}
+                    style={{
+                      animation: isSpeaking
+                        ? `audioBar${bar} 1s ease-in-out infinite`
+                        : "none",
+                      animationDelay: `${bar * 0.1}s`,
+                    }}
+                  ></div>
+                ))}
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
-      {/* Hang Up Button */}
+      {/* Hang Up Button - iPhone Style */}
       <button
         onClick={onHangup}
-        className="w-16 h-16 bg-red-500 hover:bg-red-600 text-white rounded-full transition-colors shadow-lg flex items-center justify-center mx-auto"
+        className="w-20 h-20 bg-red-500 hover:bg-red-600 active:bg-red-700 text-white rounded-full transition-all duration-200 shadow-lg hover:shadow-xl flex items-center justify-center mx-auto transform active:scale-95"
       >
-        <svg className="w-6 h-6" fill="currentColor" viewBox="0 0 24 24">
+        <svg className="w-8 h-8" fill="currentColor" viewBox="0 0 24 24">
           <path d="M6.62 10.79c1.44 2.83 3.76 5.14 6.59 6.59l2.2-2.2c.27-.27.67-.36 1.02-.24 1.12.37 2.33.57 3.57.57.55 0 1 .45 1 1V20c0 .55-.45 1-1 1-9.39 0-17-7.61-17-17 0-.55.45-1 1-1h3.5c.55 0 1 .45 1 1 0 1.25.2 2.45.57 3.57.11.35.03.74-.25 1.02l-2.2 2.2z" />
           <path
             d="M21 3L3 21"
             stroke="white"
-            strokeWidth="3"
+            strokeWidth="2"
             strokeLinecap="round"
           />
         </svg>

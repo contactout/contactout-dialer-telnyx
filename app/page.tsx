@@ -199,6 +199,7 @@ export default function Home() {
             callState={telnyxActions.callState || ""}
             callDuration={state.callDuration}
             autoRedirectCountdown={state.autoRedirectCountdown}
+            currentCall={telnyxActions.currentCall}
           />
         </div>
       </div>

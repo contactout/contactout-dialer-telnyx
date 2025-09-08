@@ -214,6 +214,12 @@ export function formatPhoneNumber(
 
   if (!detectedCountry) return cleaned;
 
+  // Check if this is an international call
+  const isInternational =
+    cleaned.startsWith("+") ||
+    (cleaned.startsWith(detectedCountry.dialCode) &&
+      detectedCountry.code !== "US");
+
   // Remove country code for formatting
   let nationalNumber = cleaned;
   if (cleaned.startsWith("+")) {
@@ -226,31 +232,59 @@ export function formatPhoneNumber(
   }
 
   // Apply country-specific formatting
+  let formattedNumber: string;
   switch (detectedCountry.code) {
     case "US":
     case "CA":
-      return formatUSNumber(nationalNumber);
+      formattedNumber = formatUSNumber(nationalNumber);
+      break;
     case "GB":
-      return formatUKNumber(nationalNumber);
+      formattedNumber = formatUKNumber(nationalNumber);
+      break;
     case "DE":
-      return formatGermanNumber(nationalNumber);
+      formattedNumber = formatGermanNumber(nationalNumber);
+      break;
     case "FR":
-      return formatFrenchNumber(nationalNumber);
+      formattedNumber = formatFrenchNumber(nationalNumber);
+      break;
     case "AU":
-      return formatAustralianNumber(nationalNumber);
+      formattedNumber = formatAustralianNumber(nationalNumber);
+      break;
     case "JP":
-      return formatJapaneseNumber(nationalNumber);
+      formattedNumber = formatJapaneseNumber(nationalNumber);
+      break;
     case "IN":
-      return formatIndianNumber(nationalNumber);
+      formattedNumber = formatIndianNumber(nationalNumber);
+      break;
     case "BR":
-      return formatBrazilianNumber(nationalNumber);
+      formattedNumber = formatBrazilianNumber(nationalNumber);
+      break;
     case "MX":
-      return formatMexicanNumber(nationalNumber);
+      formattedNumber = formatMexicanNumber(nationalNumber);
+      break;
     case "PH":
-      return formatPhilippineNumber(nationalNumber);
+      formattedNumber = formatPhilippineNumber(nationalNumber);
+      break;
     default:
-      return cleaned;
+      formattedNumber = cleaned;
   }
+
+  // Add "+" prefix for international calls (visual only)
+  if (isInternational && !formattedNumber.startsWith("+")) {
+    // Check if the formatted number already includes the country code
+    const hasCountryCode = formattedNumber.startsWith(detectedCountry.dialCode);
+    if (hasCountryCode) {
+      // Remove the duplicate country code and add + prefix
+      const withoutCountryCode = formattedNumber
+        .substring(detectedCountry.dialCode.length)
+        .trim();
+      return `+${detectedCountry.dialCode} ${withoutCountryCode}`;
+    } else {
+      return `+${detectedCountry.dialCode} ${formattedNumber}`;
+    }
+  }
+
+  return formattedNumber;
 }
 
 /**
