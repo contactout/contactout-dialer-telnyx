@@ -17,6 +17,12 @@ export const useRemoteAudioLevel = (
       return;
     }
 
+    // Prevent multiple setups for the same call
+    if (audioContextRef.current) {
+      console.log("🎵 Audio context already exists, skipping setup");
+      return;
+    }
+
     const setupAudioAnalysis = async () => {
       try {
         // Access remote audio stream from Telnyx call
@@ -41,14 +47,30 @@ export const useRemoteAudioLevel = (
             "🔍 No remote stream found in call object:",
             Object.keys(currentCall)
           );
+          // Try to wait a bit and check again, as the stream might not be ready yet
+          setTimeout(() => {
+            console.log("🔄 Retrying remote stream access...");
+            setupAudioAnalysis();
+          }, 1000);
           return;
         }
 
-        console.log("🎤 Setting up remote audio analysis");
+        console.log("🎤 Setting up remote audio analysis and playback");
 
-        // Set up audio analysis (reuse AudioTest pattern)
+        // Set up audio analysis and playback (reuse AudioTest pattern)
         const audioContext = new (window.AudioContext ||
           (window as any).webkitAudioContext)();
+
+        // Ensure audio context is running for playback
+        if (audioContext.state === "suspended") {
+          try {
+            await audioContext.resume();
+            console.log("🎵 Audio context resumed for remote audio playback");
+          } catch (error) {
+            console.warn("⚠️ Failed to resume audio context:", error);
+          }
+        }
+
         const analyser = audioContext.createAnalyser();
         const source = audioContext.createMediaStreamSource(remoteStream);
 
@@ -57,6 +79,14 @@ export const useRemoteAudioLevel = (
         const dataArray = new Uint8Array(bufferLength);
 
         source.connect(analyser);
+        // CRITICAL FIX: Connect remote audio to browser output for playback
+        source.connect(audioContext.destination);
+
+        console.log("✅ Remote audio stream connected to browser output");
+        console.log("🎵 Audio context state:", audioContext.state);
+        console.log("🔊 Remote stream active:", remoteStream.active);
+        console.log("🎤 Audio tracks:", remoteStream.getAudioTracks().length);
+
         analyserRef.current = analyser;
         audioContextRef.current = audioContext;
 
