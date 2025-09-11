@@ -1,6 +1,7 @@
 import { useState, useEffect, useCallback, useRef } from "react";
 import { TelnyxRTC } from "@telnyx/webrtc";
 import { DatabaseService } from "@/lib/database";
+import { jwtManager } from "@/lib/jwtManager";
 import {
   validateCallFlowSequence,
   validateRingingStateTransition,
@@ -156,6 +157,7 @@ export const useTelnyxWebRTC = (
   const [isConnected, setIsConnected] = useState(false);
   const [isInitializing, setIsInitializing] = useState(false);
   const [isReconnecting, setIsReconnecting] = useState(false);
+  const [jwtAuthFailed, setJwtAuthFailed] = useState(false);
 
   // Call state
   const [currentCall, setCurrentCall] = useState<any>(null);
@@ -314,7 +316,15 @@ export const useTelnyxWebRTC = (
                 currentError.includes("failed") ||
                 currentError.includes("busy") ||
                 currentError.includes("no-answer") ||
-                currentError.includes("voice mail"))
+                currentError.includes("voice mail") ||
+                // New Telnyx sample app patterns
+                currentError.includes("Call was rejected") ||
+                currentError.includes("The remote user is busy") ||
+                currentError.includes("Invalid phone number") ||
+                currentError.includes("Call was not answered") ||
+                currentError.includes("Call ended") ||
+                currentError.includes("Number not reachable") ||
+                currentError.includes("Call ended unexpectedly"))
             ) {
               // Keep the error for the popup to display
               return currentError;
@@ -381,7 +391,7 @@ export const useTelnyxWebRTC = (
           setCallStartTime(null);
           setCallConnectedTime(null);
           setCurrentDialedNumber(null);
-          setError(null);
+          // Don't clear error here - let error popup handle it
           // Don't reset wasCallConnected here - we need it for cleanup logic
           // FIXED: Prevent recursive calls by using direct state update instead of transitionCallState
           const transitionTimeout = setTimeout(() => {
@@ -786,7 +796,22 @@ export const useTelnyxWebRTC = (
       });
 
       telnyxClient.on("telnyx.error", (error: any) => {
-        console.error("❌ Telnyx client error:", error);
+        // Enhanced error logging to identify root cause
+        console.error("❌ Telnyx WebRTC error details:", {
+          code: error.code,
+          message: error.message,
+          details: error.details,
+          fullError: error,
+          timestamp: new Date().toISOString(),
+          config: {
+            hasApiKey: !!config.apiKey,
+            hasSipUsername: !!config.sipUsername,
+            hasSipPassword: !!config.sipPassword,
+            sipUsernameLength: config.sipUsername?.length,
+            sipPasswordLength: config.sipPassword?.length,
+            apiKeyPrefix: config.apiKey?.substring(0, 10),
+          },
+        });
 
         // Enhanced error handling with Telnyx best practices
         const errorMessages: Record<string, string> = {
@@ -964,9 +989,34 @@ export const useTelnyxWebRTC = (
                     ? (Date.now() - callStartTime) / 1000
                     : 0;
 
-                  // Use native Telnyx hangup events instead of manual detection
-                  const hangupCause = call.hangup_cause || call.reason;
-                  const hangupSource = call.hangup_source || call.source;
+                  // DEBUG: Log all available call properties to see what Telnyx provides
+                  console.log("🔍 DEBUG - Full call object:", call);
+                  console.log("🔍 DEBUG - Call properties:", {
+                    cause: call.cause,
+                    causeCode: call.causeCode,
+                    hangup_cause: call.hangup_cause,
+                    hangup_source: call.hangup_source,
+                    reason: call.reason,
+                    source: call.source,
+                    terminationReason: call.terminationReason,
+                    sipCode: call.sipCode,
+                    sipReason: call.sipReason,
+                    state: call.state,
+                    id: call.id,
+                  });
+
+                  // Use Telnyx sample app approach - check call.cause and call.causeCode first
+                  const hangupCause =
+                    call.cause ||
+                    call.hangup_cause ||
+                    call.causeCode ||
+                    call.reason ||
+                    call.hangupReason;
+                  const hangupSource =
+                    call.hangup_source ||
+                    call.source ||
+                    call.hangupSource ||
+                    call.origin;
 
                   console.log("📞 Native Telnyx hangup event:", {
                     hangup_cause: hangupCause,
@@ -975,66 +1025,76 @@ export const useTelnyxWebRTC = (
                     call_state: currentCallStateRef.current,
                   });
 
-                  // Set appropriate error message based on native Telnyx hangup cause and source
+                  // Set appropriate error message based on Telnyx sample app approach
                   if (
-                    hangupCause === "call_rejected" ||
-                    hangupCause === "rejected"
+                    hangupCause &&
+                    hangupCause !== "NORMAL_CLEARING" &&
+                    hangupCause !== "normal_clearing"
                   ) {
-                    if (hangupSource === "callee") {
-                      setError(
-                        "Call declined - The person you called declined the call"
-                      );
-                    } else {
-                      setError(
-                        "Call rejected - The other party declined the call"
-                      );
+                    console.log(
+                      "🔍 DEBUG - Setting error for hangup cause:",
+                      hangupCause
+                    );
+
+                    // Handle specific termination reasons like Telnyx sample app
+                    switch (hangupCause) {
+                      case "CALL_REJECTED":
+                      case "call_rejected":
+                      case "rejected":
+                        setError("Call was rejected by the remote party");
+                        break;
+                      case "USER_BUSY":
+                      case "busy":
+                      case "user_busy":
+                        setError("The remote user is busy");
+                        break;
+                      case "UNALLOCATED_NUMBER":
+                      case "unallocated_number":
+                        setError("Invalid phone number");
+                        break;
+                      case "NO_ANSWER":
+                      case "no_answer":
+                      case "no-answer":
+                        setError("Call was not answered");
+                        break;
+                      case "network_error":
+                        setError("Network connection issue");
+                        break;
+                      case "timeout":
+                        setError("Connection timeout");
+                        break;
+                      default:
+                        // Show the actual cause if available
+                        setError(`Call ended: ${hangupCause}`);
+                        break;
                     }
                   } else if (
-                    hangupCause === "busy" ||
-                    hangupCause === "user_busy"
+                    hangupCause === "NORMAL_CLEARING" ||
+                    hangupCause === "normal_clearing"
                   ) {
-                    if (hangupSource === "callee") {
-                      setError(
-                        "Call failed - The person you called is currently on another call"
-                      );
+                    // If it was ringing for too long, it's unreachable
+                    if (
+                      currentCallStateRef.current === "ringing" &&
+                      duration > 30
+                    ) {
+                      setError("Call failed - Number not reachable");
                     } else {
-                      setError("Call failed - Number is busy");
-                    }
-                  } else if (
-                    hangupCause === "no_answer" ||
-                    hangupCause === "no-answer"
-                  ) {
-                    if (hangupSource === "callee") {
-                      setError("Call failed - No one answered the call");
-                    } else {
-                      setError("Call failed - No answer");
-                    }
-                  } else if (hangupCause === "normal_clearing") {
-                    if (hangupSource === "callee") {
-                      setError("Call completed - The other party hung up");
-                    } else if (hangupSource === "caller") {
-                      // User hung up - no error message needed
                       setError(null);
-                    } else {
-                      setError("Call completed");
                     }
-                  } else if (hangupCause === "unallocated_number") {
-                    setError("Call failed - Invalid phone number");
-                  } else if (hangupCause === "network_error") {
-                    setError("Call failed - Network connection issue");
-                  } else if (hangupCause === "timeout") {
-                    setError("Call failed - Connection timeout");
                   } else {
-                    // Fallback for unknown hangup causes
+                    // Fallback for unknown hangup causes - always show something
+                    console.log(
+                      "🔍 DEBUG - No hangup cause, using fallback logic"
+                    );
                     if (
                       currentCallStateRef.current === "ringing" &&
                       duration < 30
                     ) {
-                      setError(
-                        "Call rejected - The other party declined the call"
-                      );
+                      setError("Call was rejected by the remote party");
                     } else if (duration < 5) {
                       setError("Call failed - Number not reachable");
+                    } else {
+                      setError("Call ended unexpectedly");
                     }
                   }
 
@@ -1522,42 +1582,115 @@ export const useTelnyxWebRTC = (
         // CRITICAL FIX: Get microphone access with proper error handling and retry logic
         await initializeMicrophoneAccess();
 
-        // Create Telnyx client with best practices configuration
-        const telnyxClient = new TelnyxRTC({
-          login_token: config.apiKey,
-          login: config.sipUsername,
-          password: config.sipPassword,
+        // Enhanced credential validation and logging
+        console.log("🔍 Telnyx WebRTC credentials validation:", {
+          hasApiKey: !!config.apiKey,
+          hasSipUsername: !!config.sipUsername,
+          hasSipPassword: !!config.sipPassword,
+          sipUsernameLength: config.sipUsername?.length,
+          sipPasswordLength: config.sipPassword?.length,
+          apiKeyPrefix: config.apiKey?.substring(0, 10),
+          sipUsername: config.sipUsername,
+          sipPassword: config.sipPassword
+            ? "***" + config.sipPassword.slice(-4)
+            : "undefined",
         });
+
+        // Validate credentials before creating client
+        if (!config.apiKey || !config.sipUsername || !config.sipPassword) {
+          const missingCredentials = [];
+          if (!config.apiKey) missingCredentials.push("API Key");
+          if (!config.sipUsername) missingCredentials.push("SIP Username");
+          if (!config.sipPassword) missingCredentials.push("SIP Password");
+
+          throw new Error(
+            `Missing Telnyx credentials: ${missingCredentials.join(", ")}`
+          );
+        }
+
+        // Try JWT authentication first, fallback to old method if it fails
+        let authConfig;
+        console.log("🔍 JWT auth failed state:", jwtAuthFailed);
+
+        if (!jwtAuthFailed) {
+          try {
+            console.log("🔄 Attempting JWT authentication...");
+            const jwtToken = await jwtManager.getToken();
+            console.log("✅ Using JWT authentication");
+            authConfig = { login_token: jwtToken };
+          } catch (jwtError) {
+            console.warn(
+              "⚠️ JWT authentication failed, falling back to API key method:",
+              jwtError
+            );
+            setJwtAuthFailed(true); // Mark JWT as failed to prevent retries
+            // Fallback to old authentication method
+            authConfig = {
+              login_token: config.apiKey,
+              login: config.sipUsername,
+              password: config.sipPassword,
+            };
+          }
+        } else {
+          console.log(
+            "🔄 Using API key authentication (JWT previously failed)"
+          );
+          authConfig = {
+            login_token: config.apiKey,
+            login: config.sipUsername,
+            password: config.sipPassword,
+          };
+        }
+
+        console.log("🔍 Final auth config:", {
+          hasLoginToken: !!authConfig.login_token,
+          hasLogin: !!authConfig.login,
+          hasPassword: !!authConfig.password,
+        });
+
+        // Create Telnyx client with determined authentication
+        const telnyxClient = new TelnyxRTC(authConfig);
 
         // Setup all event handlers
         setupEventHandlers(telnyxClient);
 
         setClient(telnyxClient);
 
-        // Connect to Telnyx
+        // Connect to Telnyx with enhanced error logging
+        console.log("🔌 Attempting to connect to Telnyx WebRTC...");
         await telnyxClient.connect();
+        console.log("✅ Telnyx WebRTC connection successful");
         setIsInitializing(false);
         initializingRef.current = false;
         // Don't set initializedRef here - let the telnyx.ready event handle it
         // Don't set configRef here - let the telnyx.ready event handle it
       } catch (err) {
-        console.error("Failed to initialize Telnyx client:", err);
+        console.error("❌ Failed to initialize Telnyx client:", {
+          error: err,
+          message: err instanceof Error ? err.message : "Unknown error",
+          stack: err instanceof Error ? err.stack : undefined,
+          config: {
+            hasApiKey: !!config.apiKey,
+            hasSipUsername: !!config.sipUsername,
+            hasSipPassword: !!config.sipPassword,
+          },
+        });
 
         // Provide more specific error messages
         let errorMessage = "Failed to initialize WebRTC client";
         if (err instanceof Error) {
-          if (err.message.includes("login_token")) {
+          if (
+            err.message.includes("login_token") ||
+            err.message.includes("JWT")
+          ) {
             errorMessage =
-              "Invalid API key - please check your Telnyx credentials";
-          } else if (err.message.includes("login")) {
-            errorMessage =
-              "Invalid SIP username - please check your Telnyx credentials";
-          } else if (err.message.includes("password")) {
-            errorMessage =
-              "Invalid SIP password - please check your Telnyx credentials";
+              "JWT token authentication failed - please check your Telnyx credentials";
           } else if (err.message.includes("network")) {
             errorMessage =
               "Network error - please check your internet connection";
+          } else if (err.message.includes("JWT generation failed")) {
+            errorMessage =
+              "Failed to generate JWT token - please check your Telnyx API key and credential ID";
           } else {
             errorMessage = `Telnyx initialization failed: ${err.message}`;
           }
@@ -1950,5 +2083,12 @@ export const useTelnyxWebRTC = (
 
     // Call flow monitoring
     getCallFlowHealth: getCallFlowHealthCheck,
+
+    // JWT authentication management
+    resetJwtAuth: () => {
+      setJwtAuthFailed(false);
+      jwtManager.resetRetryCount();
+      console.log("🔄 JWT authentication reset");
+    },
   };
 };
