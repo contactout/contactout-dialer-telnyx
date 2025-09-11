@@ -1031,6 +1031,8 @@ export const useTelnyxWebRTC = (
                   console.log(
                     "🔍 DEBUG - Processing hangup with cause:",
                     hangupCause,
+                    "cause code:",
+                    call.causeCode,
                     "SIP code:",
                     call.sipCode,
                     "SIP reason:",
@@ -1041,8 +1043,15 @@ export const useTelnyxWebRTC = (
                     duration
                   );
 
-                  // PRIORITY 1: Check SIP response codes first (most reliable indicator)
-                  if (call.sipCode) {
+                  // PRIORITY 1: Check SIP cause codes first (most reliable indicator)
+                  // Check cause code first as it's more specific than SIP response code
+                  if (call.causeCode === 16 || call.causeCode === "16") {
+                    // SIP cause code 16 = Normal Call Clearing (normal hangup)
+                    console.log(
+                      "✅ SIP cause code 16 detected - Normal call clearing (no error)"
+                    );
+                    setError(null);
+                  } else if (call.sipCode) {
                     switch (call.sipCode) {
                       case "404":
                         setError(
@@ -1061,11 +1070,23 @@ export const useTelnyxWebRTC = (
                       case "603":
                         setError("Call was declined by the remote party");
                         break;
+                      case "200":
+                      case "OK":
+                        // Normal call termination - no error
+                        setError(null);
+                        break;
                       default:
-                        // Other SIP codes - show the SIP reason if available
-                        const errorMsg =
-                          call.sipReason || `Call failed (SIP ${call.sipCode})`;
-                        setError(errorMsg);
+                        // For other SIP codes, check if call was connected
+                        if (wasCallConnected) {
+                          // If call was connected, treat as normal end
+                          setError(null);
+                        } else {
+                          // If call was never connected, show error
+                          const errorMsg =
+                            call.sipReason ||
+                            `Call failed (SIP ${call.sipCode})`;
+                          setError(errorMsg);
+                        }
                         break;
                     }
                   }
@@ -1095,9 +1116,18 @@ export const useTelnyxWebRTC = (
                         break;
                       case "NORMAL_CLEARING":
                       case "normal_clearing":
-                        // NORMAL_CLEARING during ringing = likely unreachable (no duration check needed)
-                        if (currentCallStateRef.current === "ringing") {
+                        // NORMAL_CLEARING with cause code 16 = normal call termination (no error)
+                        if (call.causeCode === 16 || call.causeCode === "16") {
+                          console.log(
+                            "✅ NORMAL_CLEARING with cause code 16 - Normal call end (no error)"
+                          );
+                          setError(null); // Normal call end
+                        } else if (currentCallStateRef.current === "ringing") {
+                          // NORMAL_CLEARING during ringing with other cause codes = likely unreachable
                           setError("Call failed - Number not reachable");
+                        } else if (wasCallConnected) {
+                          // If call was connected, treat as normal end
+                          setError(null);
                         } else {
                           // Normal call end - no error
                           setError(null);
@@ -1110,8 +1140,14 @@ export const useTelnyxWebRTC = (
                         setError("Connection timeout");
                         break;
                       default:
-                        // Show the actual cause if available
-                        setError(`Call ended: ${hangupCause}`);
+                        // For unknown hangup causes, check if call was connected
+                        if (wasCallConnected) {
+                          // If call was connected, treat as normal end
+                          setError(null);
+                        } else {
+                          // If call was never connected, show error
+                          setError(`Call ended: ${hangupCause}`);
+                        }
                         break;
                     }
                   } else {
@@ -1120,7 +1156,10 @@ export const useTelnyxWebRTC = (
                       "🔍 DEBUG - No SIP code or hangup cause, using state-based fallback logic"
                     );
 
-                    if (currentCallStateRef.current === "ringing") {
+                    if (wasCallConnected) {
+                      // If call was connected, treat as normal end regardless of duration
+                      setError(null);
+                    } else if (currentCallStateRef.current === "ringing") {
                       // If we were ringing and got a hangup without specific cause, it's likely unreachable
                       setError("Call failed - Number not reachable");
                     } else if (duration < 5) {
@@ -1329,6 +1368,10 @@ export const useTelnyxWebRTC = (
         hangupCause === "timeout"
       ) {
         callStatus = "failed";
+      } else if (wasCallConnected) {
+        // If call was connected, treat as completed regardless of hangup cause or source
+        // This ensures calls that connected but were hung up by either party are marked as successful
+        callStatus = "completed";
       } else if (
         hangupCause === "normal_clearing" &&
         (hangupSource === "caller" || hangupSource === "callee")
@@ -1399,6 +1442,7 @@ export const useTelnyxWebRTC = (
       transitionCallState,
       trackCall,
       notifyCallStatus,
+      wasCallConnected,
     ]
   );
 
@@ -1418,9 +1462,8 @@ export const useTelnyxWebRTC = (
       let callStatus: "completed" | "failed" = "failed";
       let errorMessage = "Call failed - Unable to determine status";
 
-      // Only mark as completed if we have clear indicators of success
-      if (duration > 5 && wasCallConnected) {
-        // Longer call that was connected - likely successful
+      // If call was connected, mark as completed regardless of duration
+      if (wasCallConnected) {
         callStatus = "completed";
         errorMessage = "";
       } else if (duration < 1) {

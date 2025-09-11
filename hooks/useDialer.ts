@@ -424,10 +424,6 @@ export const useDialer = (telnyxActions: {
 
   // Effects - placed after all actions are defined to avoid circular dependencies
   useEffect(() => {
-    console.log(
-      "🔍 useDialer - useEffect triggered, error:",
-      telnyxActions.error
-    );
     if (telnyxActions.error) {
       console.log("🔍 useDialer - Error received:", telnyxActions.error);
       console.log("🔍 useDialer - Call state:", telnyxActions.callState);
@@ -456,15 +452,10 @@ export const useDialer = (telnyxActions: {
         telnyxActions.error.includes("The remote user is busy") ||
         telnyxActions.error.includes("Invalid phone number") ||
         telnyxActions.error.includes("Call was not answered") ||
-        telnyxActions.error.includes("Call ended") ||
         telnyxActions.error.includes("Number not reachable") ||
         telnyxActions.error.includes("Call ended unexpectedly");
 
       console.log("🔍 useDialer - Is call failure:", isCallFailure);
-      console.log(
-        "🔍 useDialer - Error detection patterns checked for:",
-        telnyxActions.error
-      );
 
       // CRITICAL FIX: Show error popup for call failures, including rejections
       if (isCallFailure) {
@@ -491,7 +482,6 @@ export const useDialer = (telnyxActions: {
     telnyxActions.isConnecting,
     telnyxActions.isCallActive,
     telnyxActions.forceResetCallState,
-    showError,
   ]);
 
   // REMOVED: Safety timeout - UI should be in sync with Telnyx call status
