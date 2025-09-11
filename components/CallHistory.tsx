@@ -156,6 +156,9 @@ const CallHistory: React.FC<CallHistoryProps> = ({
   };
 
   const formatDuration = (duration: number) => {
+    if (!duration || duration <= 0) {
+      return "";
+    }
     if (duration < 60) {
       return `${duration}s`;
     }
@@ -286,9 +289,11 @@ const CallHistory: React.FC<CallHistoryProps> = ({
                                 <Clock className="w-3 h-3 mr-1" />
                                 {formatTimestamp(call.timestamp)}
                               </span>
-                              {call.duration && call.duration > 0 && (
-                                <span>{formatDuration(call.duration)}</span>
-                              )}
+                              {call.duration &&
+                                call.duration > 0 &&
+                                formatDuration(call.duration) && (
+                                  <span>{formatDuration(call.duration)}</span>
+                                )}
                               <span
                                 className={`text-xs px-2 py-1 rounded-full ${statusInfo.bgColor} ${statusInfo.color}`}
                               >
