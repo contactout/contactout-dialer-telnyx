@@ -1,4 +1,4 @@
-import React, { useEffect } from "react";
+import React, { useEffect, useRef } from "react";
 import { useCallAudio } from "@/hooks/useCallAudio";
 import { useCallTimer } from "@/hooks/useCallTimer";
 import { useRemoteAudioLevel } from "@/hooks/useRemoteAudioLevel";
@@ -31,6 +31,8 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   autoRedirectCountdown,
   currentCall,
 }) => {
+  // Ref for remote audio element
+  const remoteAudioRef = useRef<HTMLAudioElement>(null);
   // Use the comprehensive audio hook
   const { playCallAudio, stopAllAudio, initializeAudioContext } = useCallAudio({
     volume: 0.4,
@@ -62,6 +64,42 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
   useEffect(() => {
     initializeAudioContext();
   }, [initializeAudioContext]);
+
+  // Handle remote audio playback using HTML audio element
+  useEffect(() => {
+    if (isCallActive && currentCall && remoteAudioRef.current) {
+      // Get remote stream from Telnyx call object
+      let remoteStream = null;
+
+      if (currentCall.remoteStream) {
+        remoteStream = currentCall.remoteStream;
+      } else if (
+        currentCall.getRemoteStream &&
+        typeof currentCall.getRemoteStream === "function"
+      ) {
+        remoteStream = currentCall.getRemoteStream();
+      } else if (currentCall.remoteMediaStream) {
+        remoteStream = currentCall.remoteMediaStream;
+      } else if (currentCall.remoteAudioStream) {
+        remoteStream = currentCall.remoteAudioStream;
+      }
+
+      if (remoteStream) {
+        console.log(
+          "🔊 Setting up remote audio playback via HTML audio element"
+        );
+        remoteAudioRef.current.srcObject = remoteStream;
+        remoteAudioRef.current.play().catch((error) => {
+          console.warn("⚠️ Could not autoplay remote audio:", error);
+        });
+      } else {
+        console.log("🔍 No remote stream available for audio playback");
+      }
+    } else if (remoteAudioRef.current) {
+      // Clear the audio source when call is not active
+      remoteAudioRef.current.srcObject = null;
+    }
+  }, [isCallActive, currentCall]);
 
   // Audio playback based on call state
   useEffect(() => {
@@ -192,6 +230,24 @@ const CallingScreen: React.FC<CallingScreenProps> = ({
 
   return (
     <div className="w-full max-w-sm mx-auto text-center flex flex-col justify-center min-h-[600px]">
+      {/* Hidden audio element for remote audio playback */}
+      {isCallActive && (
+        <audio
+          ref={remoteAudioRef}
+          autoPlay
+          playsInline
+          style={{ display: "none" }}
+          onError={(e) => {
+            console.error("❌ Remote audio playback error:", e);
+          }}
+          onLoadStart={() => {
+            console.log("🔊 Remote audio started loading");
+          }}
+          onCanPlay={() => {
+            console.log("🔊 Remote audio ready to play");
+          }}
+        />
+      )}
       {/* Error Display */}
       {error && (
         <div className="mb-6 p-4 bg-red-100 border border-red-300 rounded-lg text-red-700">

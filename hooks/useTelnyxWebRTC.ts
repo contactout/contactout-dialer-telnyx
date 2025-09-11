@@ -984,6 +984,7 @@ export const useTelnyxWebRTC = (
                 transitionCallState("ended", call);
               } else if (call.state === "hangup" || call.state === "destroy") {
                 // Handle call endings using native Telnyx events
+                // CRITICAL: Handle hangup events in ANY state, not just after active
                 if (call.state === "hangup") {
                   const duration = callStartTime
                     ? (Date.now() - callStartTime) / 1000
@@ -1025,18 +1026,51 @@ export const useTelnyxWebRTC = (
                     call_state: currentCallStateRef.current,
                   });
 
-                  // Set appropriate error message based on Telnyx sample app approach
-                  if (
-                    hangupCause &&
-                    hangupCause !== "NORMAL_CLEARING" &&
-                    hangupCause !== "normal_clearing"
-                  ) {
-                    console.log(
-                      "🔍 DEBUG - Setting error for hangup cause:",
-                      hangupCause
-                    );
+                  // EVENT-DRIVEN SOLUTION: Handle hangup based on SIP codes and call state
+                  // This replaces the previous timeout-based approach with proper SIP code handling
+                  console.log(
+                    "🔍 DEBUG - Processing hangup with cause:",
+                    hangupCause,
+                    "SIP code:",
+                    call.sipCode,
+                    "SIP reason:",
+                    call.sipReason,
+                    "from state:",
+                    currentCallStateRef.current,
+                    "duration:",
+                    duration
+                  );
 
-                    // Handle specific termination reasons like Telnyx sample app
+                  // PRIORITY 1: Check SIP response codes first (most reliable indicator)
+                  if (call.sipCode) {
+                    switch (call.sipCode) {
+                      case "404":
+                        setError(
+                          "Invalid phone number - number does not exist"
+                        );
+                        break;
+                      case "480":
+                        setError("Number temporarily unavailable");
+                        break;
+                      case "486":
+                        setError("The remote user is busy");
+                        break;
+                      case "487":
+                        setError("Call was terminated");
+                        break;
+                      case "603":
+                        setError("Call was declined by the remote party");
+                        break;
+                      default:
+                        // Other SIP codes - show the SIP reason if available
+                        const errorMsg =
+                          call.sipReason || `Call failed (SIP ${call.sipCode})`;
+                        setError(errorMsg);
+                        break;
+                    }
+                  }
+                  // PRIORITY 2: Check hangup causes if no SIP code
+                  else if (hangupCause) {
                     switch (hangupCause) {
                       case "CALL_REJECTED":
                       case "call_rejected":
@@ -1050,12 +1084,24 @@ export const useTelnyxWebRTC = (
                         break;
                       case "UNALLOCATED_NUMBER":
                       case "unallocated_number":
-                        setError("Invalid phone number");
+                        setError(
+                          "Invalid phone number or number not reachable"
+                        );
                         break;
                       case "NO_ANSWER":
                       case "no_answer":
                       case "no-answer":
                         setError("Call was not answered");
+                        break;
+                      case "NORMAL_CLEARING":
+                      case "normal_clearing":
+                        // NORMAL_CLEARING during ringing = likely unreachable (no duration check needed)
+                        if (currentCallStateRef.current === "ringing") {
+                          setError("Call failed - Number not reachable");
+                        } else {
+                          // Normal call end - no error
+                          setError(null);
+                        }
                         break;
                       case "network_error":
                         setError("Network connection issue");
@@ -1068,33 +1114,21 @@ export const useTelnyxWebRTC = (
                         setError(`Call ended: ${hangupCause}`);
                         break;
                     }
-                  } else if (
-                    hangupCause === "NORMAL_CLEARING" ||
-                    hangupCause === "normal_clearing"
-                  ) {
-                    // If it was ringing for too long, it's unreachable
-                    if (
-                      currentCallStateRef.current === "ringing" &&
-                      duration > 30
-                    ) {
-                      setError("Call failed - Number not reachable");
-                    } else {
-                      setError(null);
-                    }
                   } else {
-                    // Fallback for unknown hangup causes - always show something
+                    // PRIORITY 3: Fallback based on call state and duration
                     console.log(
-                      "🔍 DEBUG - No hangup cause, using fallback logic"
+                      "🔍 DEBUG - No SIP code or hangup cause, using state-based fallback logic"
                     );
-                    if (
-                      currentCallStateRef.current === "ringing" &&
-                      duration < 30
-                    ) {
-                      setError("Call was rejected by the remote party");
+
+                    if (currentCallStateRef.current === "ringing") {
+                      // If we were ringing and got a hangup without specific cause, it's likely unreachable
+                      setError("Call failed - Number not reachable");
                     } else if (duration < 5) {
+                      // Very short call duration suggests immediate failure
                       setError("Call failed - Number not reachable");
                     } else {
-                      setError("Call ended unexpectedly");
+                      // Longer call duration suggests normal end
+                      setError(null);
                     }
                   }
 

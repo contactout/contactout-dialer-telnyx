@@ -1,4 +1,5 @@
 import { useState, useRef, useEffect } from "react";
+import { useSharedAudio } from "./useSharedAudio";
 
 export const useRemoteAudioLevel = (
   currentCall: any,
@@ -8,18 +9,12 @@ export const useRemoteAudioLevel = (
   const [isSpeaking, setIsSpeaking] = useState(false);
   const analyserRef = useRef<AnalyserNode | null>(null);
   const animationFrameRef = useRef<number | null>(null);
-  const audioContextRef = useRef<AudioContext | null>(null);
+  const { getAudioContext } = useSharedAudio();
 
   useEffect(() => {
     if (!isCallActive || !currentCall) {
       setAudioLevel(0);
       setIsSpeaking(false);
-      return;
-    }
-
-    // Prevent multiple setups for the same call
-    if (audioContextRef.current) {
-      console.log("🎵 Audio context already exists, skipping setup");
       return;
     }
 
@@ -47,28 +42,18 @@ export const useRemoteAudioLevel = (
             "🔍 No remote stream found in call object:",
             Object.keys(currentCall)
           );
-          // Try to wait a bit and check again, as the stream might not be ready yet
-          setTimeout(() => {
-            console.log("🔄 Retrying remote stream access...");
-            setupAudioAnalysis();
-          }, 1000);
           return;
         }
 
-        console.log("🎤 Setting up remote audio analysis and playback");
+        console.log("🎤 Setting up remote audio analysis for visual feedback");
 
-        // Set up audio analysis and playback (reuse AudioTest pattern)
-        const audioContext = new (window.AudioContext ||
-          (window as any).webkitAudioContext)();
-
-        // Ensure audio context is running for playback
-        if (audioContext.state === "suspended") {
-          try {
-            await audioContext.resume();
-            console.log("🎵 Audio context resumed for remote audio playback");
-          } catch (error) {
-            console.warn("⚠️ Failed to resume audio context:", error);
-          }
+        // Use shared AudioContext to avoid conflicts with call audio
+        const audioContext = getAudioContext();
+        if (!audioContext) {
+          console.warn(
+            "⚠️ No audio context available for remote audio analysis"
+          );
+          return;
         }
 
         const analyser = audioContext.createAnalyser();
@@ -79,16 +64,10 @@ export const useRemoteAudioLevel = (
         const dataArray = new Uint8Array(bufferLength);
 
         source.connect(analyser);
-        // CRITICAL FIX: Connect remote audio to browser output for playback
-        source.connect(audioContext.destination);
-
-        console.log("✅ Remote audio stream connected to browser output");
-        console.log("🎵 Audio context state:", audioContext.state);
-        console.log("🔊 Remote stream active:", remoteStream.active);
-        console.log("🎤 Audio tracks:", remoteStream.getAudioTracks().length);
+        // Note: Audio playback is handled by HTML audio element in CallingScreen
+        // This is only for visual feedback (audio bars)
 
         analyserRef.current = analyser;
-        audioContextRef.current = audioContext;
 
         const updateAudioLevel = () => {
           if (!analyserRef.current) return;
@@ -118,15 +97,7 @@ export const useRemoteAudioLevel = (
         animationFrameRef.current = null;
       }
 
-      if (audioContextRef.current) {
-        try {
-          audioContextRef.current.close();
-        } catch (error) {
-          console.error("Error closing audio context:", error);
-        }
-        audioContextRef.current = null;
-      }
-
+      // No need to close audio context as it's shared
       analyserRef.current = null;
     };
   }, [isCallActive, currentCall]);
