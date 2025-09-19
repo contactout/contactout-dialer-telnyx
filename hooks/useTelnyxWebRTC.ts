@@ -1350,7 +1350,19 @@ export const useTelnyxWebRTC = (
         amd_result: amdResult,
         duration: duration,
         call_state: callState,
+        wasCallConnected,
+        callConnectedTime,
       });
+
+      // CRITICAL FIX: Determine call status FIRST, before any state cleanup
+      // This prevents race conditions where wasCallConnected gets reset before status determination
+
+      // Check multiple success indicators to ensure we don't miss connected calls
+      const wasCallSuccessfullyConnected =
+        wasCallConnected ||
+        callState === "connected" ||
+        callState === "voicemail" ||
+        (callConnectedTime && callConnectedTime > 0);
 
       // Determine call status based on native Telnyx events
       if (voiceMailDetected || machineAnswer || amdResult === "machine") {
@@ -1368,18 +1380,43 @@ export const useTelnyxWebRTC = (
         hangupCause === "timeout"
       ) {
         callStatus = "failed";
-      } else if (wasCallConnected) {
+      } else if (wasCallSuccessfullyConnected) {
         // If call was connected, treat as completed regardless of hangup cause or source
         // This ensures calls that connected but were hung up by either party are marked as successful
         callStatus = "completed";
+        console.log(
+          "✅ Call marked as completed - was successfully connected:",
+          {
+            wasCallConnected,
+            callState,
+            callConnectedTime,
+            hangupCause,
+            hangupSource,
+          }
+        );
       } else if (
         hangupCause === "normal_clearing" &&
         (hangupSource === "caller" || hangupSource === "callee")
       ) {
         callStatus = "completed";
+      } else if (hangupCause === "answered") {
+        // Handle answered calls that might not have triggered connected state
+        callStatus = "completed";
+        console.log("✅ Call marked as completed - answered by user:", {
+          hangupCause,
+          hangupSource,
+          callState,
+        });
       } else {
         // Default to failed for unknown cases to avoid false positives
         callStatus = "failed";
+        console.log("❌ Call marked as failed - no success indicators:", {
+          hangupCause,
+          hangupSource,
+          callState,
+          wasCallConnected,
+          callConnectedTime,
+        });
       }
 
       // Set error if call failed or voice mail (but only if not already set)
@@ -1462,10 +1499,27 @@ export const useTelnyxWebRTC = (
       let callStatus: "completed" | "failed" = "failed";
       let errorMessage = "Call failed - Unable to determine status";
 
+      // CRITICAL FIX: Use same improved logic as performCallCleanup
+      // Check multiple success indicators to ensure we don't miss connected calls
+      const wasCallSuccessfullyConnected =
+        wasCallConnected ||
+        callState === "connected" ||
+        callState === "voicemail" ||
+        (callConnectedTime && callConnectedTime > 0);
+
       // If call was connected, mark as completed regardless of duration
-      if (wasCallConnected) {
+      if (wasCallSuccessfullyConnected) {
         callStatus = "completed";
         errorMessage = "";
+        console.log(
+          "✅ handleCallDestroy - Call marked as completed - was successfully connected:",
+          {
+            wasCallConnected,
+            callState,
+            callConnectedTime,
+            duration,
+          }
+        );
       } else if (duration < 1) {
         // Extremely short call - likely invalid number or immediate failure
         callStatus = "failed";
